@@ -15,20 +15,14 @@ require('dotenv').config({
 
 // CORS configuration
 app.use(cors({
-  origin: ['https://test-series-frontend-one.vercel.app', 'http://localhost:5173', 'http://localhost:3000'],
+  origin: 'https://test-series-frontend-one.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept']
 }));
 
-// Security headers
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', 'https://test-series-frontend-one.vercel.app');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, Accept');
-  next();
-});
+// Pre-flight requests
+app.options('*', cors());
 
 // Middleware
 app.use(express.json());

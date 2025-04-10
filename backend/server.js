@@ -13,15 +13,16 @@ require('dotenv').config({
   path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
 });
 
-const corsOptions = {
+// CORS configuration
+app.use(cors({
   origin: 'https://test-series-frontend-one.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept']
-};
+}));
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // 👈 same config yahan bhi use karo
+// Pre-flight requests
+app.options('*', cors());
 
 // Middleware
 app.use(express.json());

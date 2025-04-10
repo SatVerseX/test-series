@@ -15,7 +15,7 @@ require('dotenv').config({
 
 // CORS configuration
 app.use(cors({
-  origin: 'https://test-series-cyan.vercel.app',
+  origin: 'https://test-series-frontend-one.vercel.app',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept']

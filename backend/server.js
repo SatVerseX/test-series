@@ -43,8 +43,8 @@ app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/admin/settings', settingsRoutes);
 
 // MongoDB connection
-mongoose.connect('mongodb://localhost:27017/test-series')
-  .then(() => console.log('Connected to MongoDB'))
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => console.log('Connected to MongoDB Atlas'))
   .catch(err => console.error('MongoDB connection error:', err));
 
 // Start server

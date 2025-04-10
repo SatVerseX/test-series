@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Container,
   Grid,
@@ -6,72 +6,51 @@ import {
   Typography,
   Box,
   CircularProgress,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Divider,
+  Button,
+  Alert
 } from '@mui/material';
-import {
-  Assessment as AssessmentIcon,
-  History as HistoryIcon,
-  Schedule as ScheduleIcon,
-} from '@mui/icons-material';
-import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
-import { auth } from '../config/firebase';
+import { useNavigate } from 'react-router-dom';
+import Leaderboard from '../components/leaderboard/Leaderboard';
+import { api } from '../config/api';
 
 const Dashboard = () => {
   const { user } = useAuth();
-  const [dashboardData, setDashboardData] = useState({
-    stats: {
-      totalTests: 0,
-      averageScore: 0,
-      completedTests: 0
-    },
-    recentTests: [],
-    upcomingTests: []
-  });
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [stats, setStats] = useState({
+    testsTaken: 0,
+    averageScore: 0,
+    totalTime: 0
+  });
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
-      try {
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          throw new Error('No authenticated user');
-        }
+    const fetchUserStats = async () => {
+      if (!user) {
+        navigate('/login');
+        return;
+      }
 
-        const token = await currentUser.getIdToken();
-        const response = await axios.get(
-          `${import.meta.env.VITE_API_URL}/api/users/${currentUser.uid}/dashboard`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-        setDashboardData(response.data);
+      try {
+        setLoading(true);
+        const response = await api.get(`/api/users/${user.firebaseId}/stats`);
+        setStats(response.data);
+        setError(null);
       } catch (error) {
-        console.error('Error fetching dashboard data:', error);
+        console.error('Error fetching user stats:', error);
+        setError(error.response?.data?.error || 'Failed to fetch user stats');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchDashboardData();
-  }, [user]);
+    fetchUserStats();
+  }, [user, navigate]);
 
   if (loading) {
     return (
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '60vh',
-        }}
-      >
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
         <CircularProgress />
       </Box>
     );
@@ -79,118 +58,91 @@ const Dashboard = () => {
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" gutterBottom>
-        Welcome, {auth.currentUser?.displayName || 'User'}!
-      </Typography>
-
-      {/* Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="h6" gutterBottom>
-              Total Tests
-            </Typography>
-            <Typography variant="h3" color="primary">
-              {dashboardData.stats.totalTests}
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="h6" gutterBottom>
-              Average Score
-            </Typography>
-            <Typography variant="h3" color="primary">
-              {dashboardData.stats.averageScore}%
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3, textAlign: 'center' }}>
-            <Typography variant="h6" gutterBottom>
-              Completed Tests
-            </Typography>
-            <Typography variant="h3" color="primary">
-              {dashboardData.stats.completedTests}
-            </Typography>
-          </Paper>
-        </Grid>
-      </Grid>
-
-      {/* Recent Tests */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
       <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
+        {/* User Stats */}
+        <Grid item xs={12} md={8}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h5" gutterBottom>
+              Welcome, {user.name || 'User'}!
+            </Typography>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={4}>
+                <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'primary.light', color: 'white' }}>
+                  <Typography variant="h6">Tests Taken</Typography>
+                  <Typography variant="h4">{stats.testsTaken}</Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'secondary.light', color: 'white' }}>
+                  <Typography variant="h6">Average Score</Typography>
+                  <Typography variant="h4">{stats.averageScore}%</Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'info.light', color: 'white' }}>
+                  <Typography variant="h6">Total Time</Typography>
+                  <Typography variant="h4">
+                    {Math.floor(stats.totalTime / 60)}h {stats.totalTime % 60}m
+                  </Typography>
+                </Paper>
+              </Grid>
+            </Grid>
+          </Paper>
+        </Grid>
+
+        {/* Quick Actions */}
+        <Grid item xs={12} md={4}>
+          <Paper sx={{ p: 3, height: '100%' }}>
+            <Typography variant="h6" gutterBottom>
+              Quick Actions
+            </Typography>
+            <Box display="flex" flexDirection="column" gap={2}>
+              <Button
+                variant="contained"
+                color="primary"
+                onClick={() => navigate('/tests')}
+                fullWidth
+              >
+                Take a Test
+              </Button>
+              <Button
+                variant="outlined"
+                color="primary"
+                onClick={() => navigate('/leaderboard')}
+                fullWidth
+              >
+                View Full Leaderboard
+              </Button>
+            </Box>
+          </Paper>
+        </Grid>
+
+        {/* Recent Tests */}
+        <Grid item xs={12} md={8}>
           <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <HistoryIcon />
+            <Typography variant="h6" gutterBottom>
               Recent Tests
             </Typography>
-            <List>
-              {dashboardData.recentTests.map((test) => (
-                <ListItem key={test.testId} divider>
-                  <ListItemIcon>
-                    <AssessmentIcon />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={test.testName}
-                    secondary={
-                      <>
-                        <Typography component="span" variant="body2">
-                          Score: {test.score}%
-                        </Typography>
-                        <br />
-                        <Typography component="span" variant="body2">
-                          Completed: {new Date(test.completedAt).toLocaleDateString()}
-                        </Typography>
-                      </>
-                    }
-                  />
-                </ListItem>
-              ))}
-              {dashboardData.recentTests.length === 0 && (
-                <ListItem>
-                  <ListItemText primary="No recent tests available" />
-                </ListItem>
-              )}
-            </List>
+            <Typography variant="body1" color="text.secondary">
+              No recent tests to display
+            </Typography>
           </Paper>
         </Grid>
 
-        {/* Upcoming Tests */}
-        <Grid item xs={12} md={6}>
+        {/* Compact Leaderboard */}
+        <Grid item xs={12} md={4}>
           <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <ScheduleIcon />
-              Upcoming Tests
+            <Typography variant="h6" gutterBottom>
+              Top Performers
             </Typography>
-            <List>
-              {dashboardData.upcomingTests.map((test) => (
-                <ListItem key={test._id} divider>
-                  <ListItemIcon>
-                    <AssessmentIcon />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={test.title}
-                    secondary={
-                      <>
-                        <Typography component="span" variant="body2">
-                          Subject: {test.subject}
-                        </Typography>
-                        <br />
-                        <Typography component="span" variant="body2">
-                          Start Date: {new Date(test.startDate).toLocaleDateString()}
-                        </Typography>
-                      </>
-                    }
-                  />
-                </ListItem>
-              ))}
-              {dashboardData.upcomingTests.length === 0 && (
-                <ListItem>
-                  <ListItemText primary="No upcoming tests available" />
-                </ListItem>
-              )}
-            </List>
+            <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
+              <Leaderboard compact={true} />
+            </Box>
           </Paper>
         </Grid>
       </Grid>

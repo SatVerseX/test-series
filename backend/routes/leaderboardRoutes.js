@@ -1,149 +1,136 @@
 const express = require('express');
 const router = express.Router();
-const User = require('../models/User');
-const admin = require('firebase-admin');
+const Leaderboard = require('../models/Leaderboard');
+const { verifyToken } = require('../middleware/auth');
 
-// Middleware to verify Firebase ID token
-const authenticateUser = async (req, res, next) => {
+// Get leaderboard with filters
+router.get('/', verifyToken, async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ error: 'No authorization header' });
+    const { subject = 'all', timeRange = 'all', page = 1, limit = 10 } = req.query;
+
+    // Calculate date range
+    let startDate;
+    if (timeRange === 'week') {
+      startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7);
+    } else if (timeRange === 'month') {
+      startDate = new Date();
+      startDate.setMonth(startDate.getMonth() - 1);
     }
 
-    const token = authHeader.split('Bearer ')[1];
-    if (!token) {
-      return res.status(401).json({ error: 'No token provided' });
+    // Build query
+    const query = {
+      subject,
+      timeRange
+    };
+
+    if (startDate) {
+      query.lastUpdated = { $gte: startDate };
     }
 
-    try {
-      const decodedToken = await admin.auth().verifyIdToken(token);
-      req.user = decodedToken;
-      next();
-    } catch (error) {
-      console.error('Token verification error:', error);
-      if (error.code === 'auth/id-token-expired') {
-        return res.status(401).json({ error: 'Token expired' });
-      }
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-  } catch (error) {
-    console.error('Authentication error:', error);
-    return res.status(500).json({ error: 'Authentication failed' });
-  }
-};
+    // Get total count
+    const total = await Leaderboard.countDocuments(query);
 
-// Get leaderboard data
-router.get('/', authenticateUser, async (req, res) => {
-  try {
-    const { subject, timeRange, page = 1, limit = 10 } = req.query;
-    
-    // Build the match query based on filters
-    const matchQuery = {};
-    
-    // Filter by subject if specified
-    if (subject && subject !== 'all') {
-      matchQuery['testHistory.subject'] = subject;
-    }
-    
-    // Filter by time range if specified
-    if (timeRange && timeRange !== 'all') {
-      const now = new Date();
-      let startDate;
-      
-      switch (timeRange) {
-        case 'today':
-          startDate = new Date(now.setHours(0, 0, 0, 0));
-          break;
-        case 'week':
-          startDate = new Date(now.setDate(now.getDate() - 7));
-          break;
-        case 'month':
-          startDate = new Date(now.setMonth(now.getMonth() - 1));
-          break;
-        case 'year':
-          startDate = new Date(now.setFullYear(now.getFullYear() - 1));
-          break;
-      }
-      
-      matchQuery['testHistory.completedAt'] = { $gte: startDate };
-    }
+    // Get paginated results
+    const leaderboard = await Leaderboard.find(query)
+      .sort({ score: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .select('userId firebaseId displayName email photoURL score testsTaken averageTime');
 
-    // First, get all users with test history
-    const users = await User.find({
-      'testHistory.0': { $exists: true } // Users who have at least one test
-    });
-
-    // Process the data in memory for more flexibility
-    const processedData = users.map(user => {
-      // Filter test history based on subject and time range
-      let filteredTests = user.testHistory;
-      
-      if (subject && subject !== 'all') {
-        filteredTests = filteredTests.filter(test => test.subject === subject);
-      }
-      
-      if (timeRange && timeRange !== 'all') {
-        const now = new Date();
-        let startDate;
-        
-        switch (timeRange) {
-          case 'today':
-            startDate = new Date(now.setHours(0, 0, 0, 0));
-            break;
-          case 'week':
-            startDate = new Date(now.setDate(now.getDate() - 7));
-            break;
-          case 'month':
-            startDate = new Date(now.setMonth(now.getMonth() - 1));
-            break;
-          case 'year':
-            startDate = new Date(now.setFullYear(now.getFullYear() - 1));
-            break;
-        }
-        
-        filteredTests = filteredTests.filter(test => 
-          new Date(test.completedAt) >= startDate
-        );
-      }
-
-      // Calculate statistics
-      const totalTests = filteredTests.length;
-      const averageScore = totalTests > 0 
-        ? filteredTests.reduce((sum, test) => sum + test.score, 0) / totalTests 
-        : 0;
-
-      return {
-        userId: user._id,
-        name: user.name,
-        grade: user.grade,
-        averageScore: Math.round(averageScore * 100) / 100,
-        totalTests
-      };
-    })
-    .filter(user => user.totalTests > 0) // Only include users with tests
-    .sort((a, b) => b.averageScore - a.averageScore); // Sort by average score
-
-    // Apply pagination
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
-    const paginatedData = processedData.slice(startIndex, endIndex);
+    // Add rank to each entry
+    const leaderboardWithRank = leaderboard.map((entry, index) => ({
+      ...entry.toObject(),
+      rank: (page - 1) * limit + index + 1
+    }));
 
     res.json({
-      leaderboard: paginatedData,
+      leaderboard: leaderboardWithRank,
       pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(processedData.length / limit),
-        totalItems: processedData.length
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
     console.error('Error fetching leaderboard:', error);
-    res.status(500).json({ 
-      message: 'Error fetching leaderboard', 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    res.status(500).json({ error: 'Error fetching leaderboard' });
+  }
+});
+
+// Update leaderboard entry (called when a test is completed)
+router.post('/update', verifyToken, async (req, res) => {
+  try {
+    const { userId, firebaseId, displayName, email, photoURL, score, timeTaken, subject } = req.body;
+
+    // Find existing entry
+    let entry = await Leaderboard.findOne({
+      userId,
+      subject,
+      timeRange: 'all'
     });
+
+    if (entry) {
+      // Update existing entry
+      entry.testsTaken += 1;
+      entry.score = ((entry.score * (entry.testsTaken - 1)) + score) / entry.testsTaken;
+      entry.averageTime = ((entry.averageTime * (entry.testsTaken - 1)) + timeTaken) / entry.testsTaken;
+      entry.lastUpdated = new Date();
+    } else {
+      // Create new entry
+      entry = new Leaderboard({
+        userId,
+        firebaseId,
+        displayName,
+        email,
+        photoURL,
+        score,
+        testsTaken: 1,
+        averageTime: timeTaken,
+        subject,
+        timeRange: 'all'
+      });
+    }
+
+    await entry.save();
+
+    // Also update weekly and monthly entries
+    const timeRanges = ['week', 'month'];
+    for (const timeRange of timeRanges) {
+      let timeEntry = await Leaderboard.findOne({
+        userId,
+        subject,
+        timeRange
+      });
+
+      if (timeEntry) {
+        timeEntry.testsTaken += 1;
+        timeEntry.score = ((timeEntry.score * (timeEntry.testsTaken - 1)) + score) / timeEntry.testsTaken;
+        timeEntry.averageTime = ((timeEntry.averageTime * (timeEntry.testsTaken - 1)) + timeTaken) / timeEntry.testsTaken;
+        timeEntry.lastUpdated = new Date();
+      } else {
+        timeEntry = new Leaderboard({
+          userId,
+          firebaseId,
+          displayName,
+          email,
+          photoURL,
+          score,
+          testsTaken: 1,
+          averageTime: timeTaken,
+          subject,
+          timeRange
+        });
+      }
+
+      await timeEntry.save();
+    }
+
+    res.json({ message: 'Leaderboard updated successfully' });
+  } catch (error) {
+    console.error('Error updating leaderboard:', error);
+    res.status(500).json({ error: 'Error updating leaderboard' });
   }
 });
 

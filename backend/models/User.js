@@ -49,7 +49,7 @@ testSchema.index({ startDate: 1, endDate: 1 });
 testSchema.index({ isActive: 1 });
 
 const userSchema = new mongoose.Schema({
-  firebaseUid: {
+  firebaseId: {
     type: String,
     required: true,
     unique: true
@@ -57,43 +57,76 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
-    unique: true,
-    trim: true,
-    lowercase: true
+    unique: true
   },
   name: {
     type: String,
-    required: true,
-    trim: true
+    required: true
+  },
+  phoneNumber: {
+    type: String,
+    trim: true,
+    default: null
   },
   grade: {
     type: String,
-    trim: true,
-    default: ''
+    required: function() {
+      return this.role === 'student';
+    }
   },
   subjects: [{
-    type: String,
-    trim: true
+    type: String
   }],
   role: {
     type: String,
-    enum: ['student', 'admin'],
+    enum: ['student', 'teacher', 'admin'],
     default: 'student'
   },
+  lastActive: {
+    type: Date,
+    default: Date.now
+  },
+  // Admin specific fields
+  adminPermissions: {
+    canCreateTests: { type: Boolean, default: false },
+    canEditTests: { type: Boolean, default: false },
+    canDeleteTests: { type: Boolean, default: false },
+    canManageUsers: { type: Boolean, default: false },
+    canViewAnalytics: { type: Boolean, default: false }
+  },
+  // Teacher specific fields
+  teacherSubjects: [{
+    type: String,
+    trim: true
+  }],
+  teacherGrades: [{
+    type: String,
+    trim: true
+  }],
+  // Test history for students
   testHistory: [{
     testId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Test'
     },
-    score: {
-      type: Number,
-      required: true
-    },
-    completedAt: {
-      type: Date,
-      default: Date.now
-    }
+    score: Number,
+    completedAt: Date,
+    timeTaken: Number
   }],
+  // Tests created by admin/teacher
+  createdTests: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Test'
+  }],
+  // Profile settings
+  profileSettings: {
+    notifications: { type: Boolean, default: true },
+    emailUpdates: { type: Boolean, default: true },
+    theme: { type: String, enum: ['light', 'dark'], default: 'light' }
+  },
+  // Account status
+  isActive: { type: Boolean, default: true },
+  lastLogin: { type: Date },
   createdAt: {
     type: Date,
     default: Date.now
@@ -101,14 +134,64 @@ const userSchema = new mongoose.Schema({
   updatedAt: {
     type: Date,
     default: Date.now
-  }
-});
+  },
+  loginCount: {
+    type: Number,
+    default: 0
+  },
+  completedTasks: {
+    type: Number,
+    default: 0
+  },
+  photoURL: String
+}, { timestamps: true });
 
-// Update the updatedAt field before saving
+// Update lastActive on save
 userSchema.pre('save', function(next) {
-  this.updatedAt = Date.now();
+  // Only update lastActive if the document is being modified
+  if (this.isModified()) {
+    this.lastActive = new Date();
+  }
   next();
 });
+
+// Set default admin permissions based on role
+userSchema.pre('save', function(next) {
+  if (this.role === 'admin') {
+    this.adminPermissions = {
+      canCreateTests: true,
+      canEditTests: true,
+      canDeleteTests: true,
+      canManageUsers: true,
+      canViewAnalytics: true
+    };
+  } else if (this.role === 'teacher') {
+    this.adminPermissions = {
+      canCreateTests: true,
+      canEditTests: true,
+      canDeleteTests: false,
+      canManageUsers: false,
+      canViewAnalytics: true
+    };
+  }
+  next();
+});
+
+// Helper method to check if user has admin permissions
+userSchema.methods.hasAdminPermission = function(permission) {
+  if (this.role === 'admin') return true;
+  return this.adminPermissions[permission] === true;
+};
+
+// Helper method to check if user is admin
+userSchema.methods.isAdmin = function() {
+  return this.role === 'admin';
+};
+
+// Helper method to check if user is teacher
+userSchema.methods.isTeacher = function() {
+  return this.role === 'teacher';
+};
 
 // Export the model directly
 module.exports = mongoose.model('User', userSchema);

@@ -2,10 +2,37 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
 import { auth } from '../config/firebase';
-import axios from 'axios';
+import { api } from '../config/api';
+import {
+  Container,
+  Typography,
+  Box,
+  Paper,
+  Avatar,
+  Button,
+  Grid,
+  Divider,
+  CircularProgress,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Alert,
+  useTheme
+} from '@mui/material';
+import {
+  Edit as EditIcon,
+  Email as EmailIcon,
+  School as SchoolIcon,
+  Book as BookIcon,
+  History as HistoryIcon
+} from '@mui/icons-material';
 
 const Profile = () => {
   const { user } = useAuth();
+  const theme = useTheme();
   const [profile, setProfile] = useState(null);
   const [testHistory, setTestHistory] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -30,14 +57,7 @@ const Profile = () => {
         const token = await currentUser.getIdToken();
         
         try {
-          const response = await axios.get(
-            `${import.meta.env.VITE_API_URL}/api/users/${currentUser.uid}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-            }
-          );
+          const response = await api.get(`/api/users/${currentUser.uid}`);
           setProfile(response.data);
           setTestHistory(response.data.testHistory || []);
           setEditForm({
@@ -47,28 +67,13 @@ const Profile = () => {
           });
         } catch (error) {
           if (error.response?.status === 404) {
-            const registerResponse = await axios.post(
-              `${import.meta.env.VITE_API_URL}/api/users/auth/google`,
-              {
-                idToken: token,
-                grade: '10th',
-                subjects: []
-              },
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                },
-              }
-            );
+            const registerResponse = await api.post('/api/users/auth/google', {
+              idToken: token,
+              grade: '10th',
+              subjects: []
+            });
             
-            const profileResponse = await axios.get(
-              `${import.meta.env.VITE_API_URL}/api/users/${currentUser.uid}`,
-              {
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                },
-              }
-            );
+            const profileResponse = await api.get(`/api/users/${currentUser.uid}`);
             setProfile(profileResponse.data);
             setTestHistory(profileResponse.data.testHistory || []);
             setEditForm({
@@ -109,19 +114,10 @@ const Profile = () => {
         throw new Error('No authenticated user');
       }
 
-      const token = await currentUser.getIdToken();
-      const response = await axios.put(
-        `${import.meta.env.VITE_API_URL}/api/users/${currentUser.uid}`,
-        {
-          ...editForm,
-          subjects: editForm.subjects.split(',').map((s) => s.trim()).filter(Boolean),
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await api.put(`/api/users/${currentUser.uid}`, {
+        ...editForm,
+        subjects: editForm.subjects.split(',').map((s) => s.trim()).filter(Boolean),
+      });
       setProfile(response.data);
       setTestHistory(response.data.testHistory || []);
       setEditDialogOpen(false);
@@ -137,200 +133,203 @@ const Profile = () => {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+        <CircularProgress />
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
-          <span className="block sm:inline">{error}</span>
-        </div>
-      </div>
+      <Container maxWidth="lg" sx={{ mt: 4 }}>
+        <Alert severity="error">{error}</Alert>
+      </Container>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+      <Grid container spacing={3}>
         {/* Profile Information */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="flex flex-col items-center mb-6">
-            <div className="w-32 h-32 rounded-full bg-blue-500 flex items-center justify-center text-white text-4xl font-bold mb-4">
-              {profile?.name?.[0]?.toUpperCase()}
-            </div>
-            <h2 className="text-2xl font-semibold text-gray-800 mb-2">{profile?.name}</h2>
-            <button
-              onClick={handleEditProfile}
-              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-            >
-              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              Edit Profile
-            </button>
-          </div>
+        <Grid item xs={12} md={4}>
+          <Paper 
+            elevation={0}
+            sx={{ 
+              p: 3,
+              borderRadius: 2,
+              background: `linear-gradient(135deg, ${theme.palette.primary.main}15, ${theme.palette.secondary.main}15)`,
+              backdropFilter: 'blur(10px)',
+              border: `1px solid ${theme.palette.divider}`
+            }}
+          >
+            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
+              <Avatar
+                sx={{
+                  width: 120,
+                  height: 120,
+                  bgcolor: theme.palette.primary.main,
+                  fontSize: '3rem',
+                  mb: 2
+                }}
+              >
+                {profile?.name?.[0]?.toUpperCase()}
+              </Avatar>
+              <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 1 }}>
+                {profile?.name}
+              </Typography>
+              <Button
+                variant="contained"
+                startIcon={<EditIcon />}
+                onClick={handleEditProfile}
+                sx={{ mt: 1 }}
+              >
+                Edit Profile
+              </Button>
+            </Box>
 
-          <div className="border-t border-gray-200 my-4"></div>
+            <Divider sx={{ my: 2 }} />
 
-          <div className="space-y-4">
-            <div className="flex items-center">
-              <svg className="w-6 h-6 text-gray-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              <div>
-                <p className="text-sm text-gray-500">Email</p>
-                <p className="text-gray-800">{profile?.email}</p>
-              </div>
-            </div>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <EmailIcon color="action" />
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Email
+                  </Typography>
+                  <Typography variant="body1">
+                    {profile?.email}
+                  </Typography>
+                </Box>
+              </Box>
 
-            <div className="flex items-center">
-              <svg className="w-6 h-6 text-gray-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-              </svg>
-              <div>
-                <p className="text-sm text-gray-500">Grade</p>
-                <p className="text-gray-800">{profile?.grade || 'Not specified'}</p>
-              </div>
-            </div>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <SchoolIcon color="action" />
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Grade
+                  </Typography>
+                  <Typography variant="body1">
+                    {profile?.grade || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Box>
 
-            <div className="flex items-center">
-              <svg className="w-6 h-6 text-gray-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              <div>
-                <p className="text-sm text-gray-500">Role</p>
-                <p className="text-gray-800">{profile?.role === 'student' ? 'Student' : 'Admin'}</p>
-              </div>
-            </div>
-          </div>
-
-          {profile?.subjects && profile.subjects.length > 0 && (
-            <>
-              <div className="border-t border-gray-200 my-4"></div>
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Subjects</h3>
-              <div className="flex flex-wrap gap-2">
-                {profile.subjects.map((subject) => (
-                  <span
-                    key={subject}
-                    className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
-                  >
-                    {subject}
-                  </span>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <BookIcon color="action" />
+                <Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Subjects
+                  </Typography>
+                  <Typography variant="body1">
+                    {profile?.subjects?.join(', ') || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Box>
+            </Box>
+          </Paper>
+        </Grid>
 
         {/* Test History */}
-        <div className="md:col-span-2 bg-white rounded-lg shadow-md p-6">
-          <div className="flex items-center mb-6">
-            <svg className="w-6 h-6 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <h2 className="text-xl font-semibold text-gray-800">Test History</h2>
-          </div>
+        <Grid item xs={12} md={8}>
+          <Paper 
+            elevation={0}
+            sx={{ 
+              p: 3,
+              borderRadius: 2,
+              background: `linear-gradient(135deg, ${theme.palette.primary.main}15, ${theme.palette.secondary.main}15)`,
+              backdropFilter: 'blur(10px)',
+              border: `1px solid ${theme.palette.divider}`
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+              <HistoryIcon sx={{ mr: 1, color: theme.palette.primary.main }} />
+              <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                Test History
+              </Typography>
+            </Box>
 
-          <div className="space-y-4">
-            {testHistory.map((test) => (
-              <div key={test.testId} className="border-b border-gray-200 pb-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="text-lg font-medium text-gray-900">{test.testName}</h3>
-                    <p className="text-sm text-gray-500">
-                      Score: {test.score}%
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      Completed: {new Date(test.completedAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    test.score >= 70 ? 'bg-green-100 text-green-800' :
-                    test.score >= 40 ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-red-100 text-red-800'
-                  }`}>
-                    Score: {test.score}%
-                  </span>
-                </div>
-              </div>
-            ))}
-            {testHistory.length === 0 && (
-              <p className="text-gray-500 text-center py-4">No test history available</p>
+            {testHistory.length === 0 ? (
+              <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
+                No test history available
+              </Typography>
+            ) : (
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {testHistory.map((test, index) => (
+                  <Paper
+                    key={index}
+                    elevation={0}
+                    sx={{
+                      p: 2,
+                      borderRadius: 1,
+                      border: `1px solid ${theme.palette.divider}`,
+                      '&:hover': {
+                        bgcolor: theme.palette.action.hover
+                      }
+                    }}
+                  >
+                    <Grid container spacing={2}>
+                      <Grid item xs={12} sm={6}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                          {test.testName}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Subject: {test.subject}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={12} sm={6}>
+                        <Typography variant="body2" color="text.secondary">
+                          Score: {test.score}%
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Date: {new Date(test.date).toLocaleDateString()}
+                        </Typography>
+                      </Grid>
+                    </Grid>
+                  </Paper>
+                ))}
+              </Box>
             )}
-          </div>
-        </div>
-      </div>
+          </Paper>
+        </Grid>
+      </Grid>
 
       {/* Edit Profile Dialog */}
-      {editDialogOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <h2 className="text-xl font-semibold mb-4">Edit Profile</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Name
-                </label>
-                <input
-                  type="text"
-                  value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                />
-                {!editForm.name && (
-                  <p className="text-red-500 text-sm mt-1">Name is required</p>
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Grade
-                </label>
-                <input
-                  type="text"
-                  value={editForm.grade}
-                  onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Subjects (comma-separated)
-                </label>
-                <input
-                  type="text"
-                  value={editForm.subjects}
-                  onChange={(e) => setEditForm({ ...editForm, subjects: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <p className="text-gray-500 text-sm mt-1">Enter subjects separated by commas</p>
-              </div>
-            </div>
-            <div className="mt-6 flex justify-end space-x-3">
-              <button
-                onClick={handleCloseDialog}
-                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveProfile}
-                disabled={!editForm.name || loading}
-                className={`px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors ${
-                  (!editForm.name || loading) ? 'opacity-50 cursor-not-allowed' : ''
-                }`}
-              >
-                {loading ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <Dialog open={editDialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Profile</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 2 }}>
+            <TextField
+              label="Name"
+              name="name"
+              value={editForm.name}
+              onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+              fullWidth
+            />
+            <TextField
+              label="Grade"
+              name="grade"
+              value={editForm.grade}
+              onChange={(e) => setEditForm({ ...editForm, grade: e.target.value })}
+              fullWidth
+            />
+            <TextField
+              label="Subjects (comma-separated)"
+              name="subjects"
+              value={editForm.subjects}
+              onChange={(e) => setEditForm({ ...editForm, subjects: e.target.value })}
+              fullWidth
+              helperText="Enter subjects separated by commas"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseDialog}>Cancel</Button>
+          <Button onClick={handleSaveProfile} variant="contained">
+            Save Changes
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Container>
   );
 };
 

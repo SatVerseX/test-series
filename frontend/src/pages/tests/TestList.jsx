@@ -1,268 +1,549 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useMemo } from "react";
 import {
-  Container,
-  Grid,
-  Card,
-  CardContent,
-  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
   Button,
-  Box,
-  FormControl,
-  InputLabel,
+  Chip,
   Select,
   MenuItem,
+  FormControl,
+  InputLabel,
   TextField,
-  Chip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Paper,
-} from '@mui/material';
-import {
-  AccessTime as AccessTimeIcon,
-  EmojiEvents as EmojiEventsIcon,
-} from '@mui/icons-material';
-import axios from 'axios';
-import { useAuth } from '../../contexts/AuthContext';
-import { toast } from 'react-toastify';
-import { auth } from '../../config/firebase';
+  Typography,
+  Box,
+  Stack,
+  CircularProgress,
+  InputAdornment
+} from "@mui/material";
+import AddIcon from '@mui/icons-material/Add';
+import SearchIcon from '@mui/icons-material/Search';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import { toast } from "react-toastify";
+import debounce from "lodash.debounce";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
 
 const TestList = () => {
-  const { user } = useAuth();
-  const navigate = useNavigate();
   const [tests, setTests] = useState([]);
-  const [filteredTests, setFilteredTests] = useState([]);
-  const [subjects, setSubjects] = useState([]);
-  const [grades, setGrades] = useState([]);
-  const [selectedSubject, setSelectedSubject] = useState('');
-  const [selectedGrade, setSelectedGrade] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedTest, setSelectedTest] = useState(null);
-  const [openDialog, setOpenDialog] = useState(false);
+  const [totalPages, setTotalPages] = useState(1);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [filters, setFilters] = useState({
+    status: "all",
+    search: "",
+    difficulty: "all",
+    category: "all",
+    sortBy: "createdAt",
+    sortOrder: "desc"
+  });
+  const [currentPage, setCurrentPage] = useState(1);
+  
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, api } = useAuth();
 
+  // Initialize filters from URL params
   useEffect(() => {
-    const fetchTests = async () => {
-      try {
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          throw new Error('No authenticated user');
-        }
-
-        const token = await currentUser.getIdToken();
-        const response = await axios.get(
-          `${import.meta.env.VITE_API_URL}/api/tests`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-        setTests(response.data);
-        setFilteredTests(response.data);
-
-        // Extract unique subjects and grades
-        const uniqueSubjects = [...new Set(response.data.map((test) => test.subject))];
-        const uniqueGrades = [...new Set(response.data.map((test) => test.grade))];
-        setSubjects(uniqueSubjects);
-        setGrades(uniqueGrades);
-      } catch (error) {
-        console.error('Error fetching tests:', error);
-        toast.error('Failed to load tests');
-      }
-    };
-
-    fetchTests();
+    const params = new URLSearchParams(location.search);
+    const status = params.get('status') || 'all';
+    const search = params.get('search') || '';
+    const page = parseInt(params.get('page')) || 1;
+    
+    setFilters(prev => ({
+      ...prev,
+      status,
+      search
+    }));
+    
+    setCurrentPage(page);
+    setSearchTerm(search);
+    
+    // Fetch tests with initial filters
+    fetchTests(page, {
+      ...filters,
+      status,
+      search
+    });
   }, []);
 
-  useEffect(() => {
-    let filtered = [...tests];
-
-    if (selectedSubject) {
-      filtered = filtered.filter((test) => test.subject === selectedSubject);
+  const fetchTests = async (newPage = 1, currentFilters = filters) => {
+    try {
+      setLoading(true);
+      console.log('Fetching tests with filters:', currentFilters);
+      
+      if (!api) {
+        throw new Error('API instance is not defined');
+      }
+      
+      // Build query parameters
+      const params = new URLSearchParams();
+      params.set('page', newPage);
+      params.set('limit', 5);
+      
+      // Add filters to params
+      if (currentFilters.status && currentFilters.status !== 'all') {
+        params.set('status', currentFilters.status);
+        console.log(`Setting status filter: ${currentFilters.status}`);
+      }
+      
+      if (currentFilters.search) {
+        params.set('search', currentFilters.search);
+      }
+      
+      if (currentFilters.difficulty && currentFilters.difficulty !== 'all') {
+        params.set('difficulty', currentFilters.difficulty);
+      }
+      
+      if (currentFilters.category && currentFilters.category !== 'all') {
+        params.set('category', currentFilters.category);
+      }
+      
+      if (currentFilters.sortBy) {
+        params.set('sortBy', currentFilters.sortBy);
+      }
+      
+      if (currentFilters.sortOrder) {
+        params.set('sortOrder', currentFilters.sortOrder);
+      }
+      
+      console.log('Request params:', params.toString());
+      
+      const response = await api.get(`/api/tests?${params.toString()}`);
+      console.log('API response:', response);
+      
+      setTests(response.data.tests || []);
+      setTotalPages(response.data.totalPages || 1);
+      setCurrentPage(newPage);
+    } catch (error) {
+      console.error("Error fetching tests:", error);
+      console.error("Error details:", {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      
+      if (error.response?.status === 401) {
+        toast.error("Authentication error. Please log in again.");
+        navigate('/login');
+      } else {
+        toast.error("Failed to fetch tests");
+      }
+      
+      setTests([]);
+    } finally {
+      setLoading(false);
     }
+  };
 
-    if (selectedGrade) {
-      filtered = filtered.filter((test) => test.grade === selectedGrade);
+  // Advanced filter handling with multiple filter types
+  const handleFilterChange = (filterType, value) => {
+    try {
+      console.log(`Filter change requested: ${filterType} = ${value}`);
+      
+      // Update the specific filter in state
+      setFilters(prevFilters => {
+        const newFilters = { ...prevFilters, [filterType]: value };
+        
+        // Log filter changes for debugging
+        console.log(`Filter changed: ${filterType} = ${value}`);
+        console.log('Updated filters:', newFilters);
+        
+        // Special handling for certain filter types
+        if (filterType === 'status') {
+          // Reset page when status changes to ensure proper pagination
+          setCurrentPage(1);
+        }
+        
+        // Update URL params to reflect filter changes
+        updateURLParams(newFilters);
+        
+        return newFilters;
+      });
+      
+      // Apply filter immediately instead of using debounce
+      setLoading(true);
+      fetchTests(1, { ...filters, [filterType]: value });
+    } catch (error) {
+      console.error('Error applying filter:', error);
+      setError('Failed to apply filter. Please try again.');
+    } finally {
+      setLoading(false);
     }
+  };
 
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (test) =>
-          test.title.toLowerCase().includes(term) ||
-          test.description.toLowerCase().includes(term)
+  // Advanced search with debounce, validation, and error handling
+  const handleSearchChange = (event) => {
+    try {
+      const searchValue = event.target.value;
+      
+      // Input validation
+      if (searchValue.length > 100) {
+        setError('Search query is too long. Please limit to 100 characters.');
+        return;
+      }
+      
+      // Update search term in state
+      setSearchTerm(searchValue);
+      
+      // Update filters with search term
+      setFilters(prevFilters => ({
+        ...prevFilters,
+        search: searchValue
+      }));
+      
+      // Update URL params
+      const params = new URLSearchParams(location.search);
+      if (searchValue) {
+        params.set('search', searchValue);
+      } else {
+        params.delete('search');
+      }
+      params.set('page', '1'); // Reset to first page on new search
+      navigate(`${location.pathname}?${params.toString()}`);
+      
+      // Apply search with debounce
+      debouncedSearch(searchValue);
+    } catch (error) {
+      console.error('Error handling search:', error);
+      setError('Failed to process search. Please try again.');
+    }
+  };
+
+  // Debounced search function
+  const debouncedSearch = useMemo(
+    () => debounce((value) => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch results with new search term
+        fetchTests(1, { ...filters, search: value });
+      } catch (error) {
+        console.error('Error in debounced search:', error);
+        setError('Search failed. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    }, 500),
+    [filters]
+  );
+
+  // Debounced filter application
+  const debouncedApplyFilters = useMemo(
+    () => debounce(() => {
+      try {
+        setLoading(true);
+        setError(null);
+        
+        // Fetch results with current filters
+        fetchTests(1, filters);
+      } catch (error) {
+        console.error('Error applying filters:', error);
+        setError('Failed to apply filters. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    }, 300),
+    [filters]
+  );
+
+  // Helper function to update URL parameters
+  const updateURLParams = (currentFilters) => {
+    try {
+      const params = new URLSearchParams();
+      
+      // Add all non-empty filters to URL
+      Object.entries(currentFilters).forEach(([key, value]) => {
+        if (value && value !== 'all') {
+          params.set(key, value);
+        }
+      });
+      
+      // Always include page parameter
+      params.set('page', '1');
+      
+      // Update URL without page refresh
+      navigate(`${location.pathname}?${params.toString()}`, { replace: true });
+    } catch (error) {
+      console.error('Error updating URL params:', error);
+    }
+  };
+
+  const handleToggleStatus = async (testId) => {
+    try {
+      const response = await api.put(`/api/tests/${testId}/status`);
+      setTests((prevTests) =>
+        prevTests.map((test) =>
+          test._id === testId ? { ...test, status: response.data.status } : test
+        )
       );
-    }
-
-    setFilteredTests(filtered);
-  }, [selectedSubject, selectedGrade, searchTerm, tests]);
-
-  const handleTestClick = (test) => {
-    setSelectedTest(test);
-    setOpenDialog(true);
-  };
-
-  const handleStartTest = () => {
-    if (selectedTest) {
-      navigate(`/tests/${selectedTest._id}`);
+      toast.success(`Test marked as ${response.data.status}`);
+    } catch (error) {
+      toast.error("Failed to update test status");
     }
   };
 
-  const formatDuration = (minutes) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours}h ${mins}m`;
+  const handleCreateTest = () => {
+    navigate('/test/create');
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Typography variant="h4" component="h1" gutterBottom>
-        Available Tests
-      </Typography>
-
-      {/* Filters */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              label="Search Tests"
-              variant="outlined"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <FormControl fullWidth>
-              <InputLabel>Subject</InputLabel>
-              <Select
-                value={selectedSubject}
-                label="Subject"
-                onChange={(e) => setSelectedSubject(e.target.value)}
-              >
-                <MenuItem value="">All Subjects</MenuItem>
-                {subjects.map((subject) => (
-                  <MenuItem key={subject} value={subject}>
-                    {subject}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={4}>
-            <FormControl fullWidth>
-              <InputLabel>Grade</InputLabel>
-              <Select
-                value={selectedGrade}
-                label="Grade"
-                onChange={(e) => setSelectedGrade(e.target.value)}
-              >
-                <MenuItem value="">All Grades</MenuItem>
-                {grades.map((grade) => (
-                  <MenuItem key={grade} value={grade}>
-                    {grade}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-        </Grid>
-      </Paper>
-
-      {/* Test List */}
-      <Grid container spacing={3}>
-        {filteredTests.map((test) => (
-          <Grid item xs={12} md={6} lg={4} key={test._id}>
-            <Card
+    <Paper 
+      sx={{ 
+        width: "100%", 
+        overflow: "hidden", 
+        p: 3,
+        borderRadius: 2,
+        boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+      }}
+    >
+      <Stack spacing={3}>
+        {/* Header Section */}
+        <Stack 
+          direction="row" 
+          justifyContent="space-between" 
+          alignItems="center"
+          sx={{ 
+            borderBottom: '2px solid',
+            borderColor: 'primary.main',
+            pb: 2
+          }}
+        >
+          <Typography 
+            variant="h4" 
+            component="h1"
+            sx={{ 
+              fontWeight: 600,
+              color: 'primary.main'
+            }}
+          >
+            Tests
+          </Typography>
+          {user && user.role === 'admin' && (
+            <Button 
+              variant="contained" 
+              color="primary"
+              onClick={handleCreateTest}
+              startIcon={<AddIcon />}
               sx={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                cursor: 'pointer',
+                borderRadius: 2,
+                textTransform: 'none',
+                px: 3,
+                py: 1
               }}
-              onClick={() => handleTestClick(test)}
             >
-              <CardContent>
-                <Typography variant="h6" gutterBottom>
-                  {test.title}
-                </Typography>
-                <Typography color="text.secondary" gutterBottom>
-                  {test.description}
-                </Typography>
-                <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-                  <Chip
-                    label={test.subject}
-                    color="primary"
-                    size="small"
-                  />
-                  <Chip
-                    label={test.grade}
-                    color="secondary"
-                    size="small"
-                  />
-                </Box>
-                <Box
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    mb: 1,
-                  }}
-                >
-                  <AccessTimeIcon fontSize="small" />
-                  <Typography variant="body2">
-                    Duration: {formatDuration(test.duration)}
-                  </Typography>
-                </Box>
-                <Box
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                  }}
-                >
-                  <EmojiEventsIcon fontSize="small" />
-                  <Typography variant="body2">
-                    Total Marks: {test.totalMarks}
-                  </Typography>
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-        ))}
-      </Grid>
+              Create Test
+            </Button>
+          )}
+        </Stack>
 
-      {/* Test Details Dialog */}
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)}>
-        <DialogTitle>{selectedTest?.title}</DialogTitle>
-        <DialogContent>
-          <Typography variant="body1" paragraph>
-            {selectedTest?.description}
-          </Typography>
-          <Typography variant="body2" paragraph>
-            <strong>Subject:</strong> {selectedTest?.subject}
-          </Typography>
-          <Typography variant="body2" paragraph>
-            <strong>Grade:</strong> {selectedTest?.grade}
-          </Typography>
-          <Typography variant="body2" paragraph>
-            <strong>Duration:</strong> {selectedTest?.duration} minutes
-          </Typography>
-          <Typography variant="body2" paragraph>
-            <strong>Total Marks:</strong> {selectedTest?.totalMarks}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
-          <Button onClick={handleStartTest} variant="contained" color="primary">
-            Start Test
+        {/* Search and Filters Section */}
+        <Stack 
+          direction={{ xs: 'column', md: 'row' }} 
+          spacing={2}
+          sx={{ 
+            bgcolor: 'background.paper',
+            p: 2,
+            borderRadius: 2,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+          }}
+        >
+          <TextField
+            fullWidth
+            variant="outlined"
+            placeholder="Search Tests..."
+            value={searchTerm}
+            onChange={handleSearchChange}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start">
+                  <SearchIcon color="action" />
+                </InputAdornment>
+              ),
+            }}
+            sx={{
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 2
+              }
+            }}
+          />
+          <FormControl 
+            sx={{ 
+              minWidth: { xs: '100%', md: 200 },
+              '& .MuiOutlinedInput-root': {
+                borderRadius: 2
+              }
+            }}
+          >
+            <InputLabel>Status</InputLabel>
+            <Select 
+              value={filters.status} 
+              onChange={(event) => handleFilterChange('status', event.target.value)}
+              label="Status"
+            >
+              <MenuItem value="all">All Tests</MenuItem>
+              <MenuItem value="published">Published</MenuItem>
+              <MenuItem value="draft">Draft</MenuItem>
+            </Select>
+          </FormControl>
+        </Stack>
+
+        
+        {/* Table Section */}
+        <TableContainer 
+          sx={{ 
+            borderRadius: 2,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+            '& .MuiTableCell-root': {
+              py: 2
+            }
+          }}
+        >
+          <Table>
+            <TableHead>
+              <TableRow sx={{ bgcolor: 'primary.main' }}>
+                <TableCell sx={{ color: 'white', fontWeight: 600 }}>Title</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 600 }}>Status</TableCell>
+                <TableCell sx={{ color: 'white', fontWeight: 600 }}>Actions</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {loading ? (
+                <TableRow>
+                  <TableCell colSpan={3} align="center" sx={{ py: 4 }}>
+                    <CircularProgress />
+                  </TableCell>
+                </TableRow>
+              ) : tests && tests.length > 0 ? (
+                tests.map((test) => (
+                  <TableRow 
+                    key={test._id}
+                    hover
+                    sx={{ 
+                      '&:last-child td, &:last-child th': { border: 0 },
+                      transition: 'background-color 0.2s',
+                      '&:hover': {
+                        bgcolor: 'action.hover'
+                      }
+                    }}
+                  >
+                    <TableCell>
+                      <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                        {test.title}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={test.status}
+                        color={test.status === "published" ? "success" : "default"}
+                        sx={{ 
+                          borderRadius: 1,
+                          textTransform: 'capitalize'
+                        }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={1}>
+                        {user && user.role === 'admin' && (
+                          <Button
+                            variant="contained"
+                            color={test.status === "draft" ? "primary" : "secondary"}
+                            onClick={() => handleToggleStatus(test._id)}
+                            size="small"
+                            sx={{ 
+                              borderRadius: 1,
+                              textTransform: 'none'
+                            }}
+                          >
+                            {test.status === "draft" ? "Publish" : "Unpublish"}
+                          </Button>
+                        )}
+                        <Button
+                          variant="outlined"
+                          color="primary"
+                          onClick={() => navigate(`/test/${test._id}`)}
+                          size="small"
+                          sx={{ 
+                            borderRadius: 1,
+                            textTransform: 'none'
+                          }}
+                        >
+                          {user && user.role === 'admin' ? "Edit" : "Take Test"}
+                        </Button>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={3} align="center" sx={{ py: 4 }}>
+                    <Typography variant="body1" color="text.secondary">
+                      No tests found
+                    </Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+
+        {/* Pagination Section */}
+        <Box 
+          display="flex" 
+          justifyContent="center" 
+          alignItems="center"
+          sx={{ 
+            mt: 2,
+            gap: 2
+          }}
+        >
+          <Button 
+            variant="outlined"
+            disabled={currentPage === 1} 
+            onClick={() => fetchTests(currentPage - 1)}
+            startIcon={<ChevronLeftIcon />}
+            sx={{ 
+              borderRadius: 2,
+              textTransform: 'none'
+            }}
+          >
+            Previous
           </Button>
-        </DialogActions>
-      </Dialog>
-    </Container>
+          <Typography 
+            variant="body1" 
+            sx={{ 
+              px: 2,
+              py: 1,
+              bgcolor: 'background.paper',
+              borderRadius: 2,
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+            }}
+          >
+            Page {currentPage} of {totalPages}
+          </Typography>
+          <Button 
+            variant="outlined"
+            disabled={currentPage === totalPages} 
+            onClick={() => fetchTests(currentPage + 1)}
+            endIcon={<ChevronRightIcon />}
+            sx={{ 
+              borderRadius: 2,
+              textTransform: 'none'
+            }}
+          >
+            Next
+          </Button>
+        </Box>
+      </Stack>
+    </Paper>
   );
 };
 
-export default TestList; 
+export default TestList;

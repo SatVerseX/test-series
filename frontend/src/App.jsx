@@ -8,14 +8,22 @@ import { useState, useMemo } from 'react';
 // Components
 import Navbar from './components/layout/Navbar';
 import Home from './pages/Home';
-import Login from './pages/auth/Login';
+import Login from './pages/Login';
 import Register from './pages/auth/Register';
 import Dashboard from './pages/Dashboard';
 import TestList from './pages/tests/TestList';
 import TestAttempt from './pages/tests/TestAttempt';
+import TestCreationPage from './pages/tests/testCreate';
 import Profile from './pages/Profile';
-import Leaderboard from './pages/Leaderboard';
+
 import NotFound from './pages/NotFound';
+import UserManagement from './pages/admin/UserManagement';
+import Settings from './pages/admin/Settings';
+import LeaderboardPage from './components/leaderboard/LeaderboardPage';
+import ForgotPassword from './pages/ForgotPassword';
+
+
+
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -28,19 +36,45 @@ function ProtectedRoute({ children }) {
           justifyContent: 'center',
           alignItems: 'center',
           minHeight: '100vh',
+          width: '100vw',
         }}
       >
-        <CircularProgress />
+        <CircularProgress size={50} />
       </Box>
     );
   }
 
-  if (!user) {
-    return <Navigate to="/auth/login" />;
+  return user ? children : <Navigate to="/login" />;
+}
+
+// Admin route component to ensure only admins can access certain routes
+function AdminRoute({ children }) {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '100vh',
+          width: '100vw',
+        }}
+      >
+        <CircularProgress size={50} />
+      </Box>
+    );
+  }
+
+  // Check if user exists and has admin role
+  if (!user || user.role !== 'admin') {
+    return <Navigate to="/dashboard" />;
   }
 
   return children;
 }
+
 
 function App() {
   const [mode, setMode] = useState('light');
@@ -191,13 +225,19 @@ function App() {
               >
                 <Routes>
                   <Route path="/" element={<Home />} />
-                  <Route path="/Login" element={<Login />} />
-                  <Route path="/register" element={<Register />} />
+                  
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/auth/register" element={<Register />} />
+                 <Route path="/admin/users" element={<AdminRoute><UserManagement /></AdminRoute>} />
                   <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
                   <Route path="/tests" element={<ProtectedRoute><TestList /></ProtectedRoute>} />
                   <Route path="/test/:testId" element={<ProtectedRoute><TestAttempt /></ProtectedRoute>} />
+                  <Route path="/test/create" element={<AdminRoute><TestCreationPage /></AdminRoute>} />
                   <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-                  <Route path="/leaderboard" element={<ProtectedRoute><Leaderboard /></ProtectedRoute>} />
+                  <Route path="/Leaderboard" element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>} />
+                  <Route path="/admin" element={<AdminRoute><UserManagement /></AdminRoute>} />
+                  <Route path="/admin/settings" element={<AdminRoute><Settings /></AdminRoute>} />
+                  <Route path="/forgot-password" element={<ForgotPassword />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Container>

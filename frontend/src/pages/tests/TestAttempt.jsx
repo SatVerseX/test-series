@@ -28,7 +28,7 @@ import { toast } from 'react-toastify';
 
 const TestAttempt = () => {
   const { testId } = useParams();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const navigate = useNavigate();
   const [test, setTest] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -39,19 +39,51 @@ const TestAttempt = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   useEffect(() => {
+    if (!token) {
+      console.log('No token available, redirecting to login');
+      toast.error('Please login to access this test');
+      navigate('/login');
+      return;
+    }
+
     const fetchTest = async () => {
       try {
-        const response = await axios.get(`${import.meta.env.VITE_API_URL}/api/tests/${testId}`);
-        setTest(response.data);
-        setTimeLeft(response.data.duration * 60); 
+        console.log('Fetching test with token:', token.substring(0, 10) + '...');
+        const response = await axios.get(
+          `${import.meta.env.VITE_API_URL}/api/tests/${testId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          }
+        );
+        if (response.data) {
+          console.log('Test data received:', response.data);
+          console.log('Questions:', response.data.questions);
+          console.log('First question:', response.data.questions[0]);
+          console.log('First question options:', response.data.questions[0]?.options);
+          setTest(response.data);
+          setTimeLeft(response.data.duration * 60);
+        } else {
+          toast.error('Test not found');
+          navigate('/tests');
+        }
       } catch (error) {
         console.error('Error fetching test:', error);
-        toast.error('Failed to load test');
-        navigate('/tests');
+        if (error.response?.status === 401) {
+          toast.error('Please login to access this test');
+          navigate('/login');
+        } else if (error.response?.status === 403) {
+          toast.error('You do not have permission to access this test');
+          navigate('/tests');
+        } else {
+          toast.error('Failed to load test');
+          navigate('/tests');
+        }
       }
     };
     fetchTest();
-  }, [testId, navigate]);
+  }, [testId, navigate, token]);
 
   useEffect(() => {
     if (!timeLeft) return;
@@ -78,11 +110,25 @@ const TestAttempt = () => {
   }, [answers]);
 
   const saveAnswers = async () => {
+    if (!token) {
+      console.log('No token available for saving answers');
+      return;
+    }
+
     try {
-      await axios.post(`${import.meta.env.VITE_API_URL}/api/tests/${testId}/save-progress`, {
-        userId: user.firebaseUid,
-        answers,
-      });
+      console.log('Saving answers with token:', token.substring(0, 10) + '...');
+      await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/tests/${testId}/save-progress`,
+        {
+          userId: user.firebaseId,
+          answers,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
     } catch (error) {
       console.error('Error saving progress:', error);
     }
@@ -93,13 +139,22 @@ const TestAttempt = () => {
   };
 
   const handleSubmit = async () => {
-    if (isSubmitting) return;
+    if (isSubmitting || !token) return;
     setIsSubmitting(true);
     try {
-      await axios.post(`${import.meta.env.VITE_API_URL}/api/tests/${testId}/submit`, {
-        userId: user.firebaseUid,
-        answers,
-      });
+      console.log('Submitting test with token:', token.substring(0, 10) + '...');
+      const response = await axios.post(
+        `${import.meta.env.VITE_API_URL}/api/tests/${testId}/attempt`,
+        {
+          userId: user.firebaseId,
+          answers,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
       toast.success('Test submitted successfully!');
       setTimeout(() => navigate('/dashboard'), 2000);
     } catch (error) {
@@ -137,22 +192,122 @@ const TestAttempt = () => {
         </Box>
       </Paper>
 
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h6">Question {activeStep + 1}</Typography>
-        <Typography variant="body1" paragraph>{test.questions[activeStep].questionText}</Typography>
-        <FormControl component="fieldset">
-          <RadioGroup value={answers[test.questions[activeStep]._id] || ''} onChange={(e) => handleAnswerChange(test.questions[activeStep]._id, e.target.value)}>
-            {test.questions[activeStep].options.map((option, index) => (
-              <FormControlLabel key={index} value={option.text} control={<Radio />} label={option.text} />
-            ))}
-          </RadioGroup>
-        </FormControl>
-      </Paper>
+      {test.sections && test.sections.map((section, sectionIndex) => {
+        console.log('Rendering section:', section);
+        const sectionQuestions = test.questions.filter(q => q.sectionTitle === section.title);
+        console.log('Section questions:', sectionQuestions);
+        
+        return (
+          <Paper key={section._id || sectionIndex} sx={{ p: 3, mb: 3 }}>
+            <Typography variant="h5" gutterBottom>
+              Section {sectionIndex + 1}: {section.title}
+            </Typography>
+            {section.description && (
+              <Typography variant="body1" color="text.secondary" paragraph>
+                {section.description}
+              </Typography>
+            )}
+            
+            {sectionQuestions.map((question, questionIndex) => {
+              console.log('Rendering question:', question);
+              
+              // Create options based on correctAnswer
+              const options = question.options || [
+                { text: 'a', isCorrect: question.correctAnswer === 'a' },
+                { text: 'b', isCorrect: question.correctAnswer === 'b' },
+                { text: 'c', isCorrect: question.correctAnswer === 'c' },
+                { text: 'd', isCorrect: question.correctAnswer === 'd' }
+              ];
+              
+              console.log('Question options:', options);
+              
+              return (
+                <Box key={question._id} sx={{ mb: 4 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Question {questionIndex + 1}
+                  </Typography>
+                  <Typography variant="body1" paragraph>
+                    {question.text}
+                  </Typography>
+                  <FormControl component="fieldset">
+                    <RadioGroup 
+                      value={answers[question._id] || ''} 
+                      onChange={(e) => handleAnswerChange(question._id, e.target.value)}
+                    >
+                      {options.map((option, optionIndex) => {
+                        console.log('Rendering option:', option);
+                        return (
+                          <FormControlLabel 
+                            key={optionIndex}
+                            value={option.text}
+                            control={<Radio />}
+                            label={option.text.toUpperCase()}
+                          />
+                        );
+                      })}
+                    </RadioGroup>
+                  </FormControl>
+                </Box>
+              );
+            })}
+          </Paper>
+        );
+      })}
 
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
         <Button variant="outlined" onClick={() => setShowExitDialog(true)}>Exit Test</Button>
         <Button variant="contained" color="primary" onClick={() => setShowSubmitDialog(true)}>Submit Test</Button>
       </Box>
+
+      {/* Exit Test Dialog */}
+      <Dialog
+        open={showExitDialog}
+        onClose={() => setShowExitDialog(false)}
+      >
+        <DialogTitle>Exit Test</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to exit the test? Your progress will be saved.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowExitDialog(false)}>Cancel</Button>
+          <Button 
+            onClick={() => {
+              saveAnswers();
+              navigate('/tests');
+            }}
+            color="primary"
+          >
+            Exit
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Submit Test Dialog */}
+      <Dialog
+        open={showSubmitDialog}
+        onClose={() => setShowSubmitDialog(false)}
+      >
+        <DialogTitle>Submit Test</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to submit the test? You won't be able to make changes after submission.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowSubmitDialog(false)}>Cancel</Button>
+          <Button 
+            onClick={() => {
+              setShowSubmitDialog(false);
+              handleSubmit();
+            }}
+            color="primary"
+          >
+            Submit
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };

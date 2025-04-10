@@ -1,15 +1,15 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
   Typography,
   Button,
-  Box,
   IconButton,
   Menu,
   MenuItem,
+  Box,
   Avatar,
-  Tooltip,
   useTheme,
   useMediaQuery,
   Drawer,
@@ -18,6 +18,7 @@ import {
   ListItemIcon,
   ListItemText,
   Divider,
+  Tooltip,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -28,8 +29,10 @@ import {
   Logout as LogoutIcon,
   Brightness4 as DarkModeIcon,
   Brightness7 as LightModeIcon,
+  Add as AddIcon,
+  Settings as SettingsIcon,
+  People as PeopleIcon,
 } from '@mui/icons-material';
-import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'react-toastify';
 
@@ -40,6 +43,13 @@ const Navbar = ({ toggleColorMode, mode }) => {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [anchorEl, setAnchorEl] = useState(null);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    console.log('User in Navbar:', user);
+    console.log('User role:', user?.role);
+    setIsAdmin(user?.role === 'admin');
+  }, [user]);
 
   const handleMenu = (event) => {
     setAnchorEl(event.currentTarget);
@@ -71,6 +81,16 @@ const Navbar = ({ toggleColorMode, mode }) => {
     { text: 'Profile', icon: <PersonIcon />, path: '/profile' },
   ];
 
+  const adminMenuItems = [
+    { text: 'Create Test', icon: <AddIcon />, path: '/test/create', requireAdmin: true },
+    { text: 'User Management', icon: <PeopleIcon />, path: '/admin/users', requireAdmin: true },
+    { text: 'Settings', icon: <SettingsIcon />, path: '/admin/settings', requireAdmin: true },
+  ];
+
+  const allMenuItems = isAdmin 
+    ? [...menuItems, ...adminMenuItems.filter(item => !item.requireAdmin || isAdmin)] 
+    : menuItems;
+
   const commonButtonStyles = {
     '&:hover': {
       backgroundColor: theme.palette.action.hover,
@@ -86,12 +106,12 @@ const Navbar = ({ toggleColorMode, mode }) => {
     <Box>
       <Toolbar>
         <Typography variant="h6" noWrap component="div">
-          Test Series
+          Vidya
         </Typography>
       </Toolbar>
       <Divider />
       <List>
-        {menuItems.map((item) => (
+        {allMenuItems.map((item) => (
           <ListItem
             button
             key={item.text}
@@ -128,7 +148,6 @@ const Navbar = ({ toggleColorMode, mode }) => {
         width: '100%',
       }}
     >
-      {/* Removed Container to allow full-width coverage */}
       <Toolbar
         disableGutters
         sx={{
@@ -155,12 +174,36 @@ const Navbar = ({ toggleColorMode, mode }) => {
             flexGrow: { xs: 1, md: 0 },
             textDecoration: 'none',
             color: 'primary.main',
-            fontWeight: 700,
+            fontWeight: 800,
             mr: { md: 6 },
-            fontSize: { xs: '1.2rem', sm: '1.3rem', md: '1.5rem' },
+            fontSize: { xs: '1.4rem', sm: '1.6rem', md: '1.8rem' },
+            letterSpacing: '0.05em',
+            background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            textShadow: '0px 2px 4px rgba(0,0,0,0.1)',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              transform: 'scale(1.05)',
+              background: 'linear-gradient(45deg, #1976D2 30%, #00BCD4 90%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+            },
+            display: 'flex',
+            alignItems: 'center',
+            '&::before': {
+              content: '""',
+              display: 'inline-block',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              backgroundColor: 'primary.main',
+              marginRight: '8px',
+              boxShadow: '0 0 8px rgba(33, 150, 243, 0.5)',
+            },
           }}
         >
-          Test Series
+          Vidya
         </Typography>
 
         {!isMobile && (
@@ -173,7 +216,7 @@ const Navbar = ({ toggleColorMode, mode }) => {
               ml: { md: 2 },
             }}
           >
-            {menuItems.map((item) => (
+            {allMenuItems.map((item) => (
               <Button
                 key={item.text}
                 component={RouterLink}
@@ -231,7 +274,7 @@ const Navbar = ({ toggleColorMode, mode }) => {
                     fontSize: { xs: '1rem', sm: '1.2rem' },
                   }}
                 >
-                  {user.name?.[0]?.toUpperCase()}
+                  {user.displayName?.[0]?.toUpperCase()}
                 </Avatar>
               </IconButton>
             </Tooltip>
@@ -272,6 +315,14 @@ const Navbar = ({ toggleColorMode, mode }) => {
           </ListItemIcon>
           Profile
         </MenuItem>
+        {isAdmin && (
+          <MenuItem component={RouterLink} to="/test/create">
+            <ListItemIcon>
+              <AddIcon fontSize="small" />
+            </ListItemIcon>
+            Create Test
+          </MenuItem>
+        )}
         <MenuItem onClick={handleLogout}>
           <ListItemIcon>
             <LogoutIcon fontSize="small" />

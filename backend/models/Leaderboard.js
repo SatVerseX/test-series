@@ -51,7 +51,7 @@ const leaderboardSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for better query performance
+
 leaderboardSchema.index({ subject: 1, timeRange: 1, score: -1 });
 leaderboardSchema.index({ userId: 1, subject: 1, timeRange: 1 });
 

@@ -4,7 +4,6 @@ import {
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
-  GoogleAuthProvider,
   signInWithPopup,
   getRedirectResult,
   sendPasswordResetEmail,
@@ -20,7 +19,11 @@ export const apiInstance = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
   timeout: 10000,
   retry: 3,
-  retryDelay: 1000
+  retryDelay: 1000,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json'
+  }
 });
 
 // Add retry interceptor

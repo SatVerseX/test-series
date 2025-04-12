@@ -51,6 +51,11 @@ app.use('/api/tests', testRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/admin/settings', settingsRoutes);
 
+app.get('/', (req, res) => {
+  res.send('Backend is running!');
+});
+
+
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB Atlas'))
   .catch(err => console.error('MongoDB connection error:', err));

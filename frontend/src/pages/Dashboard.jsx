@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   Container,
   Grid,
@@ -7,12 +7,12 @@ import {
   Box,
   CircularProgress,
   Button,
-  Alert
-} from '@mui/material';
-import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
-import Leaderboard from '../components/leaderboard/Leaderboard';
-import { api } from '../config/api';
+  Alert,
+} from "@mui/material";
+import { useAuth } from "../contexts/AuthContext";
+import { useNavigate } from "react-router-dom";
+import Leaderboard from "../components/leaderboard/Leaderboard";
+import { api } from "../config/api";
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -22,13 +22,13 @@ const Dashboard = () => {
   const [stats, setStats] = useState({
     testsTaken: 0,
     averageScore: 0,
-    totalTime: 0
+    totalTime: 0,
   });
 
   useEffect(() => {
     const fetchUserStats = async () => {
       if (!user) {
-        navigate('/login');
+        navigate("/login");
         return;
       }
 
@@ -38,8 +38,8 @@ const Dashboard = () => {
         setStats(response.data);
         setError(null);
       } catch (error) {
-        console.error('Error fetching user stats:', error);
-        setError(error.response?.data?.error || 'Failed to fetch user stats');
+        console.error("Error fetching user stats:", error);
+        setError(error.response?.data?.error || "Failed to fetch user stats");
       } finally {
         setLoading(false);
       }
@@ -50,7 +50,12 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+      <Box
+        display="flex"
+        justifyContent="center"
+        alignItems="center"
+        minHeight="100vh"
+      >
         <CircularProgress />
       </Box>
     );
@@ -64,27 +69,48 @@ const Dashboard = () => {
         </Alert>
       )}
       <Grid container spacing={3}>
-        {/* User Stats */}
+        
         <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 3, height: '100%' }}>
+          <Paper sx={{ p: 3, height: "100%" }}>
             <Typography variant="h5" gutterBottom>
-              Welcome, {user.name || 'User'}!
+              Welcome, {user.name || "User"}!
             </Typography>
             <Grid container spacing={2}>
               <Grid item xs={12} sm={4}>
-                <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'primary.light', color: 'white' }}>
+                <Paper
+                  sx={{
+                    p: 2,
+                    textAlign: "center",
+                    bgcolor: "primary.light",
+                    color: "white",
+                  }}
+                >
                   <Typography variant="h6">Tests Taken</Typography>
                   <Typography variant="h4">{stats.testsTaken}</Typography>
                 </Paper>
               </Grid>
               <Grid item xs={12} sm={4}>
-                <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'secondary.light', color: 'white' }}>
+                <Paper
+                  sx={{
+                    p: 2,
+                    textAlign: "center",
+                    bgcolor: "secondary.light",
+                    color: "white",
+                  }}
+                >
                   <Typography variant="h6">Average Score</Typography>
                   <Typography variant="h4">{stats.averageScore}%</Typography>
                 </Paper>
               </Grid>
               <Grid item xs={12} sm={4}>
-                <Paper sx={{ p: 2, textAlign: 'center', bgcolor: 'info.light', color: 'white' }}>
+                <Paper
+                  sx={{
+                    p: 2,
+                    textAlign: "center",
+                    bgcolor: "info.light",
+                    color: "white",
+                  }}
+                >
                   <Typography variant="h6">Total Time</Typography>
                   <Typography variant="h4">
                     {Math.floor(stats.totalTime / 60)}h {stats.totalTime % 60}m
@@ -95,9 +121,8 @@ const Dashboard = () => {
           </Paper>
         </Grid>
 
-        {/* Quick Actions */}
         <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3, height: '100%' }}>
+          <Paper sx={{ p: 3, height: "100%" }}>
             <Typography variant="h6" gutterBottom>
               Quick Actions
             </Typography>
@@ -105,7 +130,7 @@ const Dashboard = () => {
               <Button
                 variant="contained"
                 color="primary"
-                onClick={() => navigate('/tests')}
+                onClick={() => navigate("/tests")}
                 fullWidth
               >
                 Take a Test
@@ -113,7 +138,7 @@ const Dashboard = () => {
               <Button
                 variant="outlined"
                 color="primary"
-                onClick={() => navigate('/leaderboard')}
+                onClick={() => navigate("/leaderboard")}
                 fullWidth
               >
                 View Full Leaderboard
@@ -134,13 +159,12 @@ const Dashboard = () => {
           </Paper>
         </Grid>
 
-        {/* Compact Leaderboard */}
         <Grid item xs={12} md={4}>
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
               Top Performers
             </Typography>
-            <Box sx={{ maxHeight: 400, overflow: 'auto' }}>
+            <Box sx={{ maxHeight: 400, overflow: "auto" }}>
               <Leaderboard compact={true} />
             </Box>
           </Paper>
@@ -150,4 +174,4 @@ const Dashboard = () => {
   );
 };
 
-export default Dashboard; 
+export default Dashboard;

@@ -67,11 +67,10 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Error handling utility
   const handleError = useCallback((error, context) => {
     console.error(`${context} error:`, error);
     
-    // Handle network errors specifically
+
     if (error.code === 'auth/network-request-failed' || error.message?.includes('network')) {
       setError({
         message: 'Network connection error. Please check your internet connection and try again.',
@@ -90,18 +89,17 @@ export const AuthProvider = ({ children }) => {
     return error;
   }, []);
 
-  // Token management with better error handling
   const getValidToken = useCallback(async (user) => {
     try {
       const token = await user.getIdToken();
       const decodedToken = await user.getIdTokenResult();
       
-      // Check if token is about to expire (within 5 minutes)
+      
       if (decodedToken.expirationTime < Date.now() + 5 * 60 * 1000) {
         try {
           return await user.getIdToken(true);
         } catch (refreshError) {
-          // If token refresh fails, try to use the existing token
+       
           if (refreshError.code === 'auth/network-request-failed') {
             console.warn('Token refresh failed due to network error, using existing token');
             return token;
@@ -115,20 +113,18 @@ export const AuthProvider = ({ children }) => {
     }
   }, [handleError]);
 
-  // User registration with enhanced features
   const registerUser = async (userData) => {
     try {
-      // Create user with Firebase
+     
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         userData.email,
         userData.password
       );
 
-      // Get the ID token
       const token = await userCredential.user.getIdToken();
 
-      // Register user in backend - no token required for initial registration
+   
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/api/users/register`,
         {
@@ -137,17 +133,15 @@ export const AuthProvider = ({ children }) => {
           name: userData.name,
           phoneNumber: userData.phoneNumber,
           role: userData.role || 'student',
-          grade: userData.grade || '10th' // Default grade for students
+          grade: userData.grade || '10th' 
         }
       );
 
-      // Update user profile with additional info
       await updateProfile(userCredential.user, {
         displayName: userData.name,
         photoURL: userData.photoURL || null
       });
 
-      // Set the user state with both Firebase and backend data
       setUser({
         ...userCredential.user,
         ...response.data,
@@ -161,7 +155,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Auth state listener with better error handling
+ 
   useEffect(() => {
     console.log('Setting up auth state listener');
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -174,7 +168,7 @@ export const AuthProvider = ({ children }) => {
           setUser(response.data);
         } catch (error) {
           if (error.response?.status === 404) {
-            // User not found in database, register them
+            
             try {
               const token = await firebaseUser.getIdToken();
               const registerResponse = await apiInstance.post('/api/users/register', {
@@ -182,8 +176,8 @@ export const AuthProvider = ({ children }) => {
                 email: firebaseUser.email,
                 name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
                 photoURL: firebaseUser.photoURL,
-                role: 'student', // Default role
-                grade: '10' // Default grade for students
+                role: 'student', 
+                grade: '10' 
               });
               setUser(registerResponse.data);
             } catch (registerError) {
@@ -204,7 +198,7 @@ export const AuthProvider = ({ children }) => {
     return () => unsubscribe();
   }, []);
 
-  // Refresh token periodically with better error handling
+ 
   useEffect(() => {
     if (user) {
       const interval = setInterval(async () => {
@@ -217,21 +211,21 @@ export const AuthProvider = ({ children }) => {
             }));
           }
         } catch (err) {
-          // Don't log network errors during token refresh
+         
           if (err.code !== 'auth/network-request-failed') {
             console.error('Error refreshing token:', err);
           }
         }
-      }, 10 * 60 * 1000); // Refresh every 10 minutes
+      }, 10 * 60 * 1000); 
 
       return () => clearInterval(interval);
     }
   }, [user]);
 
-  // Google Sign-In
+  
   const signInWithGoogle = async () => {
     try {
-      // Try popup first
+     
       try {
         const result = await signInWithPopup(auth, googleProvider);
         const { user: firebaseUser } = result;
@@ -265,7 +259,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Check redirect result
+  
   useEffect(() => {
     const checkRedirectResult = async () => {
       try {
@@ -315,7 +309,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Registration
+  
   const register = async (userData) => {
     try {
       const user = await registerUser(userData);
@@ -326,7 +320,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Logout
+ 
   const logout = async () => {
     try {
       await signOut(auth);
@@ -337,7 +331,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Password Reset
+  
   const resetPassword = async (email) => {
     try {
       await sendPasswordResetEmail(auth, email);
@@ -347,12 +341,12 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Clear error
+  
   const clearError = useCallback(() => {
     setError(null);
   }, []);
 
-  // Return the context value with api included
+  
   const value = {
     user,
     loading,
@@ -362,7 +356,7 @@ export const AuthProvider = ({ children }) => {
     logout,
     resetPassword,
     signInWithGoogle,
-    api // Include the api instance in the context
+    api 
   };
 
   return (

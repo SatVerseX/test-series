@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { auth } from './firebase';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://test-series-raj57uerk-satish-pals-projects.vercel.app';
+const API_URL = import.meta.env.VITE_API_URL || 'https://test-series-cyan.vercel.app/';
 
 // Create API instance with retry and timeout
 const api = axios.create({

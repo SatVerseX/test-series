@@ -44,7 +44,22 @@ function ProtectedRoute({ children }) {
     );
   }
 
-  return user ? children : <Navigate to="/login" />;
+  // Check localStorage as fallback if user is null
+  if (!user) {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        console.log('Protected route using stored user data');
+        return children;
+      } catch (error) {
+        console.error('Error parsing stored user in ProtectedRoute:', error);
+        return <Navigate to="/login" />;
+      }
+    }
+    return <Navigate to="/login" />;
+  }
+
+  return children;
 }
 
 // Admin route component to ensure only admins can access certain routes

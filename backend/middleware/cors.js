@@ -1,25 +1,28 @@
-// CORS middleware for handling preflight requests
-const allowedOrigins = [
-  'https://test-series-frontend-one.vercel.app',
-  'http://localhost:5173'
-];
-
+// Update the CORS middleware to handle credentials properly
 const corsMiddleware = (req, res, next) => {
+  const allowedOrigins = [
+    'https://test-series-frontend-one.vercel.app',
+    'https://dist-grd853wzy-satish-pals-projects.vercel.app',
+    'https://frontend-9mib7iesp-satish-pals-projects.vercel.app',
+    'https://frontend-satish-pals-projects.vercel.app',
+    'http://localhost:5173'
+  ];
+  
   const origin = req.headers.origin;
   
-  // Check if the origin is in our allowed list
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+  } else {
+    // Default to main frontend in production
+    res.setHeader('Access-Control-Allow-Origin', 'https://frontend-satish-pals-projects.vercel.app');
   }
   
-  // Set other CORS headers
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   
-  // Handle preflight OPTIONS requests
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return res.status(204).end();
   }
   
   next();

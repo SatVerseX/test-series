@@ -28,7 +28,7 @@ import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import PersonIcon from '@mui/icons-material/Person';
 import CloseIcon from '@mui/icons-material/Close';
 import { useAuth } from '../../contexts/AuthContext';
-import { api } from '../../config/api';
+import api from '../../config/api';
 import { useNavigate } from 'react-router-dom';
 
 const MotionTableRow = motion(TableRow);

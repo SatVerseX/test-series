@@ -31,7 +31,7 @@ import {
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
-import { api } from '../../config/api';
+import api from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
 

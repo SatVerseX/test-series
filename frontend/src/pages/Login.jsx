@@ -134,11 +134,34 @@ const Login = () => {
 
           <Button
             variant="outlined"
-            startIcon={<GoogleIcon />}
             onClick={handleGoogleLogin}
             fullWidth
+            sx={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: 2,
+              py: 1.2,
+              color: 'rgba(0, 0, 0, 0.87)',
+              backgroundColor: '#fff',
+              borderColor: 'rgba(0, 0, 0, 0.12)',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)',
+              '&:hover': {
+                backgroundColor: '#f8f9fa',
+                borderColor: 'rgba(0, 0, 0, 0.2)',
+                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.12)'
+              }
+            }}
           >
-            Sign in with Google
+            <Box
+              component="img"
+              src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+              alt="Google logo"
+              sx={{ width: 20, height: 20 }}
+            />
+            <Typography sx={{ fontWeight: 500 }}>
+              Sign in with Google
+            </Typography>
           </Button>
 
           <Box sx={{ width: '100%', display: 'flex', justifyContent: 'space-between' }}>

@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
 import { auth } from '../config/firebase';
-import { api } from '../config/api';
+import api from '../config/api';
 import {
   Container,
   Typography,

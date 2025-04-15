@@ -11,20 +11,10 @@ import {
   updateProfile,
 } from 'firebase/auth';
 import { auth, googleProvider } from '../config/firebase';
-import axios from 'axios';
-import { api } from '../config/api';
+import api from '../config/api';
 
 // Create API instance with retry and timeout
-export const apiInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
-  timeout: 10000,
-  retry: 3,
-  retryDelay: 1000,
-  withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
+export const apiInstance = api;
 
 // Add retry interceptor
 apiInstance.interceptors.response.use(null, async (error) => {
@@ -125,8 +115,8 @@ export const AuthProvider = ({ children }) => {
       const token = await userCredential.user.getIdToken();
 
    
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/api/users/register`,
+      const response = await apiInstance.post(
+        '/api/users/register',
         {
           firebaseId: userCredential.user.uid,
           email: userData.email,
@@ -159,41 +149,71 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     console.log('Setting up auth state listener');
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      console.log('Auth state changed:', firebaseUser ? 'User logged in' : 'No user');
       if (firebaseUser) {
         try {
+          console.log('Firebase user found:', firebaseUser.uid, firebaseUser.email);
           const token = await firebaseUser.getIdToken();
-          const response = await apiInstance.get(`/api/users/${firebaseUser.uid}`, {
-            headers: { Authorization: `Bearer ${token}` }
-          });
-          setUser(response.data);
-        } catch (error) {
-          if (error.response?.status === 404) {
-            
-            try {
-              const token = await firebaseUser.getIdToken();
-              const registerResponse = await apiInstance.post('/api/users/register', {
-                firebaseId: firebaseUser.uid,
-                email: firebaseUser.email,
-                name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
-                photoURL: firebaseUser.photoURL,
-                role: 'student', 
-                grade: '10' 
-              });
-              setUser(registerResponse.data);
-            } catch (registerError) {
-              console.error('Error registering user:', registerError);
-              setUser(null);
+          console.log('Token obtained:', token ? 'Success' : 'Failed');
+          
+          try {
+            console.log('Fetching user from backend:', `${import.meta.env.VITE_API_URL}/api/users/${firebaseUser.uid}`);
+            const response = await apiInstance.get(`/api/users/${firebaseUser.uid}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            console.log('User data from backend:', response.data);
+            setUser(response.data);
+            // Store in localStorage for persistence
+            localStorage.setItem('user', JSON.stringify(response.data));
+          } catch (error) {
+            console.error('Backend API error:', error.response?.status, error.message);
+            if (error.response?.status === 404) {
+              
+              try {
+                const token = await firebaseUser.getIdToken();
+                const registerResponse = await apiInstance.post('/api/users/register', {
+                  firebaseId: firebaseUser.uid,
+                  email: firebaseUser.email,
+                  name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
+                  photoURL: firebaseUser.photoURL,
+                  role: 'student', 
+                  grade: '10' 
+                });
+                setUser(registerResponse.data);
+              } catch (registerError) {
+                console.error('Error registering user:', registerError);
+                setUser(null);
+              }
+            } else {
+              console.error('Error fetching user:', error);
+              // Try to load from localStorage as fallback
+              const storedUser = localStorage.getItem('user');
+              if (storedUser) {
+                console.log('Using stored user data as fallback');
+                setUser(JSON.parse(storedUser));
+              } else {
+                setUser(null);
+              }
             }
-          } else {
-            console.error('Error fetching user:', error);
-            setUser(null);
           }
+        } catch (error) {
+          console.error('Token fetch error:', error);
+          setUser(null);
         }
       } else {
+        console.log('No Firebase user, clearing state');
+        localStorage.removeItem('user');
         setUser(null);
       }
       setLoading(false);
     });
+
+    // Check for stored user on initial load
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      console.log('Found stored user on init');
+      setUser(JSON.parse(storedUser));
+    }
 
     return () => unsubscribe();
   }, []);

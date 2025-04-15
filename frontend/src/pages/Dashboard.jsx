@@ -12,7 +12,7 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import Leaderboard from "../components/leaderboard/Leaderboard";
-import { api } from "../config/api";
+import api from "../config/api";
 
 const Dashboard = () => {
   const { user } = useAuth();

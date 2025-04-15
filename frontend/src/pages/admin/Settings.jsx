@@ -17,7 +17,7 @@ import {
   CircularProgress
 } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
-import { api } from '../../config/api';
+import api from '../../config/api';
 
 const Settings = () => {
   const { user } = useAuth();

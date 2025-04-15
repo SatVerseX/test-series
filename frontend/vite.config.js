@@ -13,5 +13,13 @@ export default defineConfig({
         secure: false,
       }
     }
+  },
+  build: {
+    outDir: 'dist',
+    minify: 'terser',
+    sourcemap: false,
+    envPrefix: 'VITE_',
+    mode: 'production',
+    envFile: '.env.production',
   }
 })

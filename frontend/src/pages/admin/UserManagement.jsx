@@ -29,7 +29,7 @@ import {
   TableSortLabel
 } from '@mui/material';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../../config/api';
+import api from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import ErrorIcon from '@mui/icons-material/Error';

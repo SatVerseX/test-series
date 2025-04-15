@@ -9,12 +9,23 @@
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "server.js",
+      "methods": ["OPTIONS"],
       "headers": {
-        "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Origin": "https://test-series-frontend-one.vercel.app",
         "Access-Control-Allow-Methods": "GET,OPTIONS,PATCH,DELETE,POST,PUT",
-        "Access-Control-Allow-Headers": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, Origin"
+        "Access-Control-Allow-Headers": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, Origin",
+        "Access-Control-Allow-Credentials": "true"
+      },
+      "status": 204
+    },
+    {
+      "src": "/(.*)",
+      "dest": "server.js",
+      "headers": {
+        "Access-Control-Allow-Origin": "https://test-series-frontend-one.vercel.app",
+        "Access-Control-Allow-Methods": "GET,OPTIONS,PATCH,DELETE,POST,PUT",
+        "Access-Control-Allow-Headers": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization, Origin",
+        "Access-Control-Allow-Credentials": "true"
       }
     }
   ]

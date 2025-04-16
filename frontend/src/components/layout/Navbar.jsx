@@ -33,6 +33,7 @@ import {
   Settings as SettingsIcon,
   People as PeopleIcon,
   School as SchoolIcon,
+  MenuBook as MenuBookIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 import { toast } from 'react-toastify';
@@ -94,6 +95,7 @@ const Navbar = ({ toggleColorMode, mode }) => {
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
     { text: 'Tests', icon: <AssignmentIcon />, path: '/tests' },
+    { text: 'Library', icon: <MenuBookIcon />, path: '/library' },
     { text: 'Leaderboard', icon: <EmojiEventsIcon />, path: '/leaderboard' },
     { text: 'Profile', icon: <PersonIcon />, path: '/profile' },
   ];

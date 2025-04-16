@@ -15,6 +15,7 @@ import TestList from './pages/tests/TestList';
 import TestAttempt from './pages/tests/TestAttempt';
 import TestCreationPage from './pages/tests/testCreate';
 import Profile from './pages/Profile';
+import LibraryPage from './pages/Library';
 
 import NotFound from './pages/NotFound';
 import UserManagement from './pages/admin/UserManagement';
@@ -253,6 +254,7 @@ function App() {
                   <Route path="/admin" element={<AdminRoute><UserManagement /></AdminRoute>} />
                   <Route path="/admin/settings" element={<AdminRoute><Settings /></AdminRoute>} />
                   <Route path="/forgot-password" element={<ForgotPassword />} />
+                  <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Container>

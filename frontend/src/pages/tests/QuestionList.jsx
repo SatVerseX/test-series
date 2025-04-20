@@ -17,9 +17,9 @@ const getQuestionTypeColor = (type) => {
   switch (type) {
     case 'mcq':
       return 'primary';
-    case 'true_false':
+    case 'trueFalse':
       return 'success';
-    case 'short_answer':
+    case 'shortAnswer':
       return 'warning';
     case 'integer':
       return 'info';
@@ -32,9 +32,9 @@ const getQuestionTypeLabel = (type) => {
   switch (type) {
     case 'mcq':
       return 'Multiple Choice';
-    case 'true_false':
+    case 'trueFalse':
       return 'True/False';
-    case 'short_answer':
+    case 'shortAnswer':
       return 'Short Answer';
     case 'integer':
       return 'Integer';
@@ -143,12 +143,12 @@ const QuestionList = ({
                           <Typography
                             key={optIndex}
                             variant="body2"
-                            color={option === question.correctAnswer ? 'success.main' : 'text.secondary'}
+                            color={option.isCorrect ? 'success.main' : 'text.secondary'}
                             sx={{
-                              fontWeight: option === question.correctAnswer ? 'bold' : 'normal'
+                              fontWeight: option.isCorrect ? 'bold' : 'normal'
                             }}
                           >
-                            {String.fromCharCode(65 + optIndex)}. {option}
+                            {String.fromCharCode(65 + optIndex)}. {option.text}
                           </Typography>
                         ))}
                       </Box>

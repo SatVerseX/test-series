@@ -7,6 +7,11 @@ const config = {
   
   // Use this function to get the current API URL based on environment
   getApiUrl: function() {
+    // In production, we always want to use the PRODUCTION_API_URL
+    if (import.meta.env.PROD) {
+      return this.PRODUCTION_API_URL;
+    }
+    
     // If production URL is set, use it, otherwise fallback to proxy setup in package.json
     if (this.PRODUCTION_API_URL) {
       return this.PRODUCTION_API_URL;

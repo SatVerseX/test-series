@@ -150,6 +150,34 @@ const testSchema = new mongoose.Schema({
       default: true
     }
   },
+  // New fields for paid/free tests
+  isPaid: {
+    type: Boolean,
+    default: false
+  },
+  price: {
+    type: Number,
+    default: 0
+  },
+  discount: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100
+  },
+  accessDuration: {
+    type: String,
+    default: 'Unlimited'
+  },
+  // Fields for connecting to test series
+  isSeriesTest: {
+    type: Boolean, 
+    default: false
+  },
+  seriesId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'TestSeries'
+  },
   metadata: {
     lastModified: {
       type: Date,
@@ -209,6 +237,16 @@ testSchema.pre('save', function(next) {
     this.totalQuestions = this.questions.length;
     this.metadata.lastModified = new Date();
 
+    // Validate paid test data
+    if (this.isPaid && this.price <= 0) {
+      throw new Error('Paid tests must have a price greater than 0');
+    }
+
+    // Validate test series connection
+    if (this.isSeriesTest && !this.seriesId) {
+      throw new Error('Series tests must have a seriesId');
+    }
+
     console.log('Final test totals:', {
       totalMarks: this.totalMarks,
       totalQuestions: this.totalQuestions
@@ -266,6 +304,13 @@ testSchema.methods.calculateStats = function() {
   return stats;
 };
 
+// Method to get discounted price
+testSchema.methods.getDiscountedPrice = function() {
+  if (!this.isPaid) return 0;
+  if (!this.discount) return this.price;
+  return this.price - (this.price * this.discount / 100);
+};
+
 // Static method to find tests by creator
 testSchema.statics.findByCreator = function(creatorId) {
   return this.find({ createdBy: creatorId });
@@ -274,6 +319,11 @@ testSchema.statics.findByCreator = function(creatorId) {
 // Static method to find published tests
 testSchema.statics.findPublished = function() {
   return this.find({ status: 'published' });
+};
+
+// Static method to find tests in a series
+testSchema.statics.findBySeries = function(seriesId) {
+  return this.find({ isSeriesTest: true, seriesId: seriesId, status: 'published' });
 };
 
 const Test = mongoose.model('Test', testSchema);

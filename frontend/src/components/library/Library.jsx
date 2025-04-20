@@ -10,6 +10,7 @@ import RecommendedBooks from './RecommendedBooks.jsx';
 import ReadingList from './ReadingList.jsx';
 import axios from 'axios';
 import api from '../../config/api';
+import config from '../../config/config';
 
 const Library = () => {
   const [books, setBooks] = useState([]);
@@ -24,8 +25,8 @@ const Library = () => {
 
   // Define API base URL with fallback options
   const getApiBaseUrl = () => {
-    // Try development proxy first (relative path)
-    return '/api';
+    // Use the library API URL from config.js
+    return config.getApiUrl();
   };
 
   const handleSearch = async (searchParams) => {
@@ -54,20 +55,66 @@ const Library = () => {
       const apiUrl = getApiBaseUrl();
       console.log('Making API request using URL base:', apiUrl);
       
-      // Make API request with explicit configuration
+      // Get a "wake up" message first for cold starts (Render.com free tier often sleeps)
+      try {
+        console.log('Sending wake-up request to API...');
+        await axios({
+          method: 'get',
+          url: `${apiUrl}/`, // Just hit the root endpoint to wake up the server
+          timeout: 5000
+        });
+        console.log('API is awake, proceeding with search');
+      } catch (wakeupErr) {
+        // Ignore wake-up errors, just proceed with main request
+        console.log('Wake-up request failed or timed out, proceeding anyway');
+      }
+      
+      // Make API request with explicit configuration and increased timeout
       const response = await axios({
         method: 'get',
-        url: `${apiUrl}/library/search?${params.toString()}`,
+        url: `${apiUrl}/search?${params.toString()}`,
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        timeout: 10000 // 10 second timeout
+        timeout: 30000 // 30 second timeout for cold starts
       });
       
       console.log('Search API response:', response);
       
-      if (response.data.success) {
+      // The API returns the array directly, not wrapped in a success object
+      if (Array.isArray(response.data)) {
+        console.log('Search successful, found books:', response.data.length || 0);
+        const fetchedBooks = response.data || [];
+        
+        // Log mirror links for the first few books for debugging
+        fetchedBooks.slice(0, 3).forEach((book, index) => {
+          console.log(`Book ${index+1} mirror links:`, {
+            Mirror_1: book.Mirror_1,
+            Mirror_2: book.Mirror_2,
+            Mirror_3: book.Mirror_3,
+            original_mirrors: book.original_mirrors
+          });
+        });
+        
+        setBooks(fetchedBooks);
+        
+        // Save search to recent searches
+        if (searchParams.title || searchParams.author) {
+          const searchQuery = {
+            id: Date.now(),
+            query: searchParams.title || searchParams.author,
+            timestamp: new Date().toISOString(),
+            params: searchParams
+          };
+          
+          setUserPreferences(prev => ({
+            ...prev,
+            recentSearches: [searchQuery, ...prev.recentSearches].slice(0, 5)
+          }));
+        }
+      } else if (response.data && response.data.success) {
+        // Fallback for API responses that use the success wrapper
         console.log('Search successful, found books:', response.data.data?.length || 0);
         const fetchedBooks = response.data.data || [];
         
@@ -112,7 +159,12 @@ const Library = () => {
         request: err.request ? 'Request was made but no response received' : 'No request'
       });
       
-      setError(err.response?.data?.message || err.message || 'Failed to search books. Please check if the backend server is running.');
+      // More user-friendly error message for timeout
+      if (err.code === 'ECONNABORTED') {
+        setError('The search request timed out. The library service might be starting up. Please try again in a moment.');
+      } else {
+        setError(err.response?.data?.message || err.message || 'Failed to search books. Please check if the backend server is running.');
+      }
     } finally {
       setLoading(false);
     }

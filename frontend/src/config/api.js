@@ -4,15 +4,37 @@ import { auth } from "./firebase";
 const API_URL =
   import.meta.env.VITE_API_URL || "https://backend-satish-pals-projects.vercel.app";
 
+// Create a custom timeout promise that will reject after a set time
+const ABSOLUTE_TIMEOUT = 90000; // 90 seconds absolute maximum time for any request
+
+// Create API instance with reasonable defaults
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 30000,
+  timeout: 60000, // 60 second timeout
   withCredentials: true,
   headers: {
     "Content-Type": "application/json",
     "Accept": "application/json"
   },
 });
+
+// Create a function to add absolute timeout to any request
+const withAbsoluteTimeout = (promise, timeoutMs = ABSOLUTE_TIMEOUT) => {
+  let timeoutId;
+  
+  // Create a promise that rejects after timeout
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error('Request exceeded absolute maximum timeout'));
+    }, timeoutMs);
+  });
+  
+  // Race between the original promise and the timeout
+  return Promise.race([
+    promise,
+    timeoutPromise
+  ]).finally(() => clearTimeout(timeoutId));
+};
 
 // Add request interceptor to attach auth token to all requests
 api.interceptors.request.use(
@@ -53,6 +75,43 @@ api.interceptors.response.use(
   async (error) => {
     console.error('API Error:', error.response?.status, error.config?.url);
     
+    // Handle network errors/timeouts
+    if (!error.response) {
+      console.error('Network error or timeout:', error.message);
+      
+      // Check if it's a timeout error
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        // Get the original request config
+        const originalRequest = error.config;
+        
+        // If retry attempt count is not set, initialize it
+        if (!originalRequest._retryCount) {
+          originalRequest._retryCount = 0;
+        }
+        
+        // Limit to 2 retry attempts for timeouts
+        if (originalRequest._retryCount < 2) {
+          originalRequest._retryCount++;
+          
+          // Log retry attempt
+          console.log(`Retrying request (${originalRequest._retryCount}/2) after timeout: ${originalRequest.url}`);
+          
+          // Delay before retry
+          const delay = 1000;
+          
+          // Return a promise that resolves after the delay and retries the request
+          return new Promise(resolve => {
+            setTimeout(() => {
+              resolve(api(originalRequest));
+            }, delay);
+          });
+        }
+        
+        // If we've reached max retries, reject with clear message
+        return Promise.reject(new Error('Request failed after multiple attempts due to timeout'));
+      }
+    }
+    
     // Check for token expiration
     if (error.response?.status === 401) {
       // Try to refresh token
@@ -69,9 +128,62 @@ api.interceptors.response.use(
       }
     }
     
+    // Handle 504 Outdated Request errors with retry logic
+    if (error.response?.status === 504) {
+      // Get the original request config
+      const originalRequest = error.config;
+      
+      // If retry attempt count is not set, initialize it
+      if (!originalRequest._retryCount) {
+        originalRequest._retryCount = 0;
+      }
+      
+      // Limit to 2 retry attempts (reduced from 3)
+      if (originalRequest._retryCount < 2) {
+        originalRequest._retryCount++;
+        
+        // Log retry attempt
+        console.log(`Retrying request (${originalRequest._retryCount}/2) after 504 error: ${originalRequest.url}`);
+        
+        // Add exponential backoff delay based on retry count
+        const delay = 1000 * Math.pow(2, originalRequest._retryCount - 1);
+        
+        // Return a promise that resolves after the delay and retries the request
+        return new Promise(resolve => {
+          setTimeout(() => {
+            resolve(api(originalRequest));
+          }, delay);
+        });
+      }
+      
+      // If we've reached max retries, reject with clear message
+      return Promise.reject(new Error('Server unavailable after multiple attempts (504 error)'));
+    }
+    
     return Promise.reject(error);
   }
 );
+
+// Override the get, post, put, delete methods to add absolute timeout protection
+const originalGet = api.get;
+api.get = function(url, config) {
+  return withAbsoluteTimeout(originalGet.call(this, url, config));
+};
+
+const originalPost = api.post;
+api.post = function(url, data, config) {
+  return withAbsoluteTimeout(originalPost.call(this, url, data, config));
+};
+
+const originalPut = api.put;
+api.put = function(url, data, config) {
+  return withAbsoluteTimeout(originalPut.call(this, url, data, config));
+};
+
+const originalDelete = api.delete;
+api.delete = function(url, config) {
+  return withAbsoluteTimeout(originalDelete.call(this, url, config));
+};
 
 // Specialized function for handling download link requests
 api.getDownloadLinks = async (book) => {
@@ -160,8 +272,8 @@ api.getDownloadLinks = async (book) => {
     
     // Fallback to API call if mirror links aren't available
     // Use longer timeout for download link requests
-    const response = await api.post('/library/resolve', book, {
-      timeout: 20000 // 20 second timeout
+    const response = await api.post('/resolve', book, {
+      timeout: 40000 // 40 second timeout
     });
     
     if (!response.data || !response.data.success) {

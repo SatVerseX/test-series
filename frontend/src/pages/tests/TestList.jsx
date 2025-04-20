@@ -468,7 +468,13 @@ const TestList = () => {
                         <Button
                           variant="outlined"
                           color="primary"
-                          onClick={() => navigate(`/test/${test._id}`)}
+                          onClick={() => {
+                            if (user && user.role === 'admin') {
+                              navigate(`/test/edit/${test._id}`);
+                            } else {
+                              navigate(`/test-attempt/${test._id}`);
+                            }
+                          }}
                           size="small"
                           sx={{ 
                             borderRadius: 1,

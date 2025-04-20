@@ -23,8 +23,8 @@ import {
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 
-const MotionBox = motion(Box);
-const MotionCard = motion(Card);
+const MotionBox = motion.create(Box);
+const MotionCard = motion.create(Card);
 
 const features = [
   {
@@ -137,7 +137,7 @@ const Home = () => {
                     color="secondary"
                     size="large"
                     endIcon={<ArrowForwardIcon />}
-                    onClick={() => navigate('/register')}
+                    onClick={() => navigate('/auth/register')}
                     sx={{ 
                       px: 4, 
                       py: 1.5, 
@@ -384,7 +384,7 @@ const Home = () => {
                     color="secondary"
                     size="large"
                     endIcon={<ArrowForwardIcon />}
-                    onClick={() => navigate('/register')}
+                    onClick={() => navigate('/auth/register')}
                     sx={{ 
                       px: 4, 
                       py: 1.5, 

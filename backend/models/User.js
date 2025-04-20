@@ -118,11 +118,64 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Test'
   }],
+  // Purchased test series
+  purchasedSeries: [{
+    seriesId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TestSeries'
+    },
+    purchaseId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Purchase'
+    },
+    purchasedAt: {
+      type: Date,
+      default: Date.now
+    },
+    expiresAt: {
+      type: Date
+    },
+    progress: {
+      testsAttempted: { type: Number, default: 0 },
+      testsCompleted: { type: Number, default: 0 },
+      averageScore: { type: Number, default: 0 }
+    }
+  }],
+  // Purchased individual tests
+  purchasedTests: [{
+    testId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Test'
+    },
+    purchaseId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Purchase'
+    },
+    purchasedAt: {
+      type: Date,
+      default: Date.now
+    },
+    expiresAt: {
+      type: Date
+    },
+    completed: { type: Boolean, default: false },
+    score: { type: Number }
+  }],
   // Profile settings
   profileSettings: {
     notifications: { type: Boolean, default: true },
     emailUpdates: { type: Boolean, default: true },
     theme: { type: String, enum: ['light', 'dark'], default: 'light' }
+  },
+  // User preferences
+  preferences: {
+    defaultCategory: { type: String, default: 'all' },
+    defaultView: { type: String, enum: ['card', 'list'], default: 'card' },
+    defaultSort: { type: String, default: 'newest' },
+    lastViewedTests: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Test'
+    }]
   },
   // Account status
   isActive: { type: Boolean, default: true },
@@ -191,6 +244,15 @@ userSchema.methods.isAdmin = function() {
 // Helper method to check if user is teacher
 userSchema.methods.isTeacher = function() {
   return this.role === 'teacher';
+};
+
+// Helper method to check if user has purchased a test series
+userSchema.methods.hasPurchased = function(seriesId) {
+  return this.purchasedSeries.some(purchase => {
+    // Check if purchase is valid (not expired)
+    const isValid = !purchase.expiresAt || new Date() < purchase.expiresAt;
+    return purchase.seriesId.toString() === seriesId.toString() && isValid;
+  });
 };
 
 // Export the model directly

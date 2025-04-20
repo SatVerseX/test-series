@@ -34,8 +34,10 @@ import {
   People as PeopleIcon,
   School as SchoolIcon,
   MenuBook as MenuBookIcon,
+  AssignmentTurnedIn as AssignmentTurnedInIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
+
 import { toast } from 'react-toastify';
 
 const Navbar = ({ toggleColorMode, mode }) => {
@@ -92,12 +94,14 @@ const Navbar = ({ toggleColorMode, mode }) => {
     setMobileOpen(!mobileOpen);
   };
 
-  const menuItems = [
-    { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
-    { text: 'Tests', icon: <AssignmentIcon />, path: '/tests' },
-    { text: 'Library', icon: <MenuBookIcon />, path: '/library' },
-    { text: 'Leaderboard', icon: <EmojiEventsIcon />, path: '/leaderboard' },
-    { text: 'Profile', icon: <PersonIcon />, path: '/profile' },
+  const userMenuItems = [
+    { text: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
+    { text: 'Tests', path: '/tests', icon: <AssignmentIcon /> },
+    { text: 'My Tests', path: '/my-tests', icon: <AssignmentTurnedInIcon /> },
+    { text: 'Test Series', path: '/test-series', icon: <MenuBookIcon /> },
+    { text: 'Library', path: '/library', icon: <MenuBookIcon /> },
+    { text: 'Leaderboard', path: '/leaderboard', icon: <EmojiEventsIcon /> },
+    //{ text: 'Profile', path: '/profile', icon: <PersonIcon /> },
   ];
 
   const adminMenuItems = [
@@ -107,8 +111,8 @@ const Navbar = ({ toggleColorMode, mode }) => {
   ];
 
   const allMenuItems = isAdmin 
-    ? [...menuItems, ...adminMenuItems.filter(item => !item.requireAdmin || isAdmin)] 
-    : menuItems;
+    ? [...userMenuItems, ...adminMenuItems.filter(item => !item.requireAdmin || isAdmin)] 
+    : userMenuItems;
 
   const commonButtonStyles = {
     '&:hover': {
@@ -426,6 +430,7 @@ const Navbar = ({ toggleColorMode, mode }) => {
             ml: { xs: 'auto', sm: 2 },
           }}
         >
+         
           <IconButton
             color="inherit"
             onClick={toggleColorMode}

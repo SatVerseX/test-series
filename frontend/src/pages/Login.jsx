@@ -81,7 +81,7 @@ const Login = () => {
           }}
         >
           <Typography variant="h4" component="h1" gutterBottom>
-            Welcome to Testify
+            Welcome to Vidya
           </Typography>
           
           <Typography variant="body1" color="text.secondary" align="center">

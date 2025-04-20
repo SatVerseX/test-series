@@ -17,6 +17,8 @@ const testRoutes = require('./routes/testRoutes');
 const leaderboardRoutes = require('./routes/leaderboardRoutes');
 const settingsRoutes = require('./routes/settingsRoutes');
 const libraryRoutes = require('./routes/libraryRoutes');
+const testSeriesRoutes = require('./routes/testSeriesRoutes');
+const purchaseRoutes = require('./routes/purchaseRoutes');
 
 const app = express();
 
@@ -94,6 +96,8 @@ app.use('/api/tests', testRoutes);
 app.use('/api/leaderboard', leaderboardRoutes);
 app.use('/api/admin/settings', settingsRoutes);
 app.use('/api/library', libraryRoutes);
+app.use('/api/test-series', testSeriesRoutes);
+app.use('/api/purchases', purchaseRoutes);
 
 // Quick response endpoint for testing
 app.get('/api/health', (req, res) => {

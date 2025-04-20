@@ -1,9 +1,13 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme, CssBaseline, Box, Container, CircularProgress } from '@mui/material';
 import { ToastContainer } from 'react-toastify';
+import { Toaster } from 'react-hot-toast';
 import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ExamCategoryProvider } from './contexts/ExamCategoryContext';
+import { TestAttemptProvider } from './contexts/TestAttemptContext';
 import { useState, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
 
 // Components
 import Navbar from './components/layout/Navbar';
@@ -14,6 +18,11 @@ import Dashboard from './pages/Dashboard';
 import TestList from './pages/tests/TestList';
 import TestAttempt from './pages/tests/TestAttempt';
 import TestCreationPage from './pages/tests/testCreate';
+import TestCategoryList from './pages/tests/TestCategoryList';
+import TestSeriesList from './pages/tests/TestSeriesList';
+import TestSeriesForm from './pages/tests/TestSeriesForm';
+import TestSeriesEdit from './pages/tests/TestSeriesEdit';
+import MyTests from './pages/tests/MyTests';
 import Profile from './pages/Profile';
 import LibraryPage from './pages/Library';
 
@@ -22,6 +31,10 @@ import UserManagement from './pages/admin/UserManagement';
 import Settings from './pages/admin/Settings';
 import LeaderboardPage from './components/leaderboard/LeaderboardPage';
 import ForgotPassword from './pages/ForgotPassword';
+import TestResultsPage from './pages/TestResultsPage';
+import TestSeriesLeaderboardPage from './pages/tests/TestSeriesLeaderboardPage';
+import TestLeaderboardPage from './pages/tests/TestLeaderboardPage';
+import TestSeriesDetail from './pages/tests/TestSeriesDetail';
 
 
 
@@ -91,6 +104,16 @@ function AdminRoute({ children }) {
   return children;
 }
 
+// TestAttempt with provider route component
+function TestAttemptWithProvider() {
+  const { testId } = useParams();
+  
+  return (
+    <TestAttemptProvider>
+      <TestAttempt />
+    </TestAttemptProvider>
+  );
+}
 
 function App() {
   const [mode, setMode] = useState('light');
@@ -202,78 +225,87 @@ function App() {
 
   return (
     <AuthProvider>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <Router>
-          <Box
-            sx={{
-              display: 'flex',
-              flexDirection: 'column',
-              minHeight: '100vh',
-              width: '100%',
-              bgcolor: 'background.default',
-              transition: 'background-color 0.3s ease-in-out',
-            }}
-          >
-            <Navbar toggleColorMode={toggleColorMode} mode={mode} />
+      <ExamCategoryProvider>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <Router>
             <Box
-              component="main"
               sx={{
-                flexGrow: 1,
-                width: '100%',
                 display: 'flex',
                 flexDirection: 'column',
-                alignItems: 'center',
-                py: { xs: 2, sm: 3, md: 4 },
-                px: { xs: 2, sm: 3, md: 4 },
-                transition: 'all 0.3s ease-in-out',
+                minHeight: '100vh',
+                width: '100%',
+                bgcolor: 'background.default',
+                transition: 'background-color 0.3s ease-in-out',
               }}
             >
-              <Container 
-                maxWidth="xl" 
+              <Navbar toggleColorMode={toggleColorMode} mode={mode} />
+              <Box
+                component="main"
                 sx={{
+                  flexGrow: 1,
                   width: '100%',
-                  height: '100%',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: { xs: 2, sm: 3, md: 4 },
+                  alignItems: 'center',
+                  py: { xs: 2, sm: 3, md: 4 },
+                  px: { xs: 2, sm: 3, md: 4 },
+                  transition: 'all 0.3s ease-in-out',
                 }}
               >
-                <Routes>
-                  <Route path="/" element={<Home />} />
-                  
-                  <Route path="/login" element={<Login />} />
-                  <Route path="/auth/register" element={<Register />} />
-                 <Route path="/admin/users" element={<AdminRoute><UserManagement /></AdminRoute>} />
-                  <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-                  <Route path="/tests" element={<ProtectedRoute><TestList /></ProtectedRoute>} />
-                  <Route path="/test/:testId" element={<ProtectedRoute><TestAttempt /></ProtectedRoute>} />
-                  <Route path="/test/create" element={<AdminRoute><TestCreationPage /></AdminRoute>} />
-                  <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-                  <Route path="/Leaderboard" element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>} />
-                  <Route path="/admin" element={<AdminRoute><UserManagement /></AdminRoute>} />
-                  <Route path="/admin/settings" element={<AdminRoute><Settings /></AdminRoute>} />
-                  <Route path="/forgot-password" element={<ForgotPassword />} />
-                  <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
-              </Container>
+                <Container 
+                  maxWidth="xl" 
+                  sx={{
+                    width: '100%',
+                    height: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: { xs: 2, sm: 3, md: 4 },
+                  }}
+                >
+                  <Routes>
+                    <Route path="/" element={<Home />} />
+                    
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/auth/register" element={<Register />} />
+                    <Route path="/admin/users" element={<AdminRoute><UserManagement /></AdminRoute>} />
+                    <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+                    <Route path="/tests" element={<ProtectedRoute><TestList /></ProtectedRoute>} />
+                    <Route path="/tests/categories" element={<ProtectedRoute><TestCategoryList /></ProtectedRoute>} />
+                    <Route path="/test-series" element={<ProtectedRoute><TestSeriesList /></ProtectedRoute>} />
+                    <Route path="/test-series/create" element={<AdminRoute><TestSeriesForm /></AdminRoute>} />
+                    <Route path="/test-series/edit/:id" element={<AdminRoute><TestSeriesEdit /></AdminRoute>} />
+                    <Route path="/test-series/:seriesId/leaderboard" element={<ProtectedRoute><TestSeriesLeaderboardPage /></ProtectedRoute>} />
+                    <Route path="/test-series/:seriesId/test/:testId/leaderboard" element={<ProtectedRoute><TestLeaderboardPage /></ProtectedRoute>} />
+                    <Route path="/test-series/:seriesId" element={<ProtectedRoute><TestSeriesDetail /></ProtectedRoute>} />
+                    <Route path="/my-tests" element={<ProtectedRoute><MyTests /></ProtectedRoute>} />
+                    <Route path="/test/edit/:testId" element={<AdminRoute><TestCreationPage /></AdminRoute>} />
+                    <Route path="/test/create" element={<AdminRoute><TestCreationPage /></AdminRoute>} />
+                    <Route 
+                      path="/test-attempt/:testId" 
+                      element={
+                        <ProtectedRoute>
+                          <TestAttemptWithProvider />
+                        </ProtectedRoute>
+                      } 
+                    />
+                    <Route path="/test-results/:testId/:userId" element={<ProtectedRoute><TestResultsPage /></ProtectedRoute>} />
+                    <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+                    <Route path="/Leaderboard" element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>} />
+                    <Route path="/admin" element={<AdminRoute><UserManagement /></AdminRoute>} />
+                    <Route path="/admin/settings" element={<AdminRoute><Settings /></AdminRoute>} />
+                    <Route path="/forgot-password" element={<ForgotPassword />} />
+                    <Route path="/library" element={<ProtectedRoute><LibraryPage /></ProtectedRoute>} />
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </Container>
+              </Box>
+              <ToastContainer position="bottom-right" autoClose={5000} />
+              <Toaster position="bottom-right" toastOptions={{ duration: 5000 }} />
             </Box>
-            <ToastContainer
-              position="top-right"
-              autoClose={5000}
-              hideProgressBar={false}
-              newestOnTop
-              closeOnClick
-              rtl={false}
-              pauseOnFocusLoss
-              draggable
-              pauseOnHover
-              theme={mode}
-            />
-          </Box>
-        </Router>
-      </ThemeProvider>
+          </Router>
+        </ThemeProvider>
+      </ExamCategoryProvider>
     </AuthProvider>
   );
 }

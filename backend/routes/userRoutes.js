@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Test = require('../models/Test');
 const { verifyToken, isAdmin } = require('../middleware/auth');
 const admin = require('firebase-admin');
+const TestAttempt = require('../models/TestAttempt');
 
 // Register new user (no token verification required)
 router.post('/register', async (req, res) => {
@@ -187,10 +188,13 @@ router.get('/', verifyToken, isAdmin, async (req, res) => {
 // Get user profile
 router.get('/:id', verifyToken, async (req, res) => {
   try {
+    console.log(`Fetching user with firebaseId: ${req.params.id}`);
     const user = await User.findOne({ firebaseId: req.params.id });
     if (!user) {
+      console.log(`User not found with firebaseId: ${req.params.id}`);
       return res.status(404).json({ error: 'User not found' });
     }
+    console.log(`User found: ${user._id}`);
     res.json({
       id: user._id,
       firebaseId: user.firebaseId,
@@ -198,12 +202,17 @@ router.get('/:id', verifyToken, async (req, res) => {
       name: user.name,
       grade: user.grade,
       subjects: user.subjects,
-      role: user.role,
-      testHistory: user.testHistory || []
+      role: user.role
     });
   } catch (error) {
-    console.error('Error fetching user profile:', error);
-    res.status(500).json({ error: 'Error fetching user profile' });
+    console.error('Error fetching user:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    res.status(500).json({ error: 'Error fetching user', details: error.message });
   }
 });
 
@@ -252,25 +261,61 @@ router.get('/:id/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// Get user stats
+// Get user statistics and recent test attempts
 router.get('/:id/stats', verifyToken, async (req, res) => {
   try {
-    const user = await User.findOne({ firebaseId: req.params.id });
+    // Check if the requested user is the logged-in user or the user is an admin
+    if (req.params.id !== req.user.firebaseId && !req.dbUser.isAdmin()) {
+      return res.status(403).json({ error: 'You can only view your own stats' });
+    }
+
+    // Get user and populate test attempts
+    const user = await User.findOne({ firebaseId: req.params.id })
+      .select('testAttempts');
+    
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Calculate stats from test history
-    const testHistory = user.testHistory || [];
-    const stats = {
-      testsTaken: testHistory.length,
-      averageScore: testHistory.length > 0
-        ? Math.round(testHistory.reduce((sum, test) => sum + test.score, 0) / testHistory.length * 100) / 100
-        : 0,
-      totalTime: testHistory.reduce((sum, test) => sum + (test.timeTaken || 0), 0)
-    };
+    // Fetch test attempts for this user
+    const testAttempts = await TestAttempt.find({ userId: req.params.id })
+      .sort({ completedAt: -1 })
+      .limit(10)
+      .populate({
+        path: 'testId',
+        select: 'title description subject grade'
+      });
 
-    res.json(stats);
+    // Calculate stats
+    const testsTaken = testAttempts.length;
+    const completedTests = testAttempts.filter(attempt => attempt.status === 'completed');
+    const averageScore = completedTests.length > 0 
+      ? completedTests.reduce((sum, attempt) => sum + (attempt.score || 0), 0) / completedTests.length 
+      : 0;
+    
+    // Calculate total time spent on tests (in minutes)
+    const totalTime = 0; // This would require tracking start and end times
+    
+    // Format the recently completed tests
+    const recentTests = testAttempts.map(attempt => ({
+      id: attempt._id,
+      testId: attempt.testId?._id,
+      title: attempt.testId?.title || 'Unknown Test',
+      subject: attempt.testId?.subject || 'N/A',
+      score: attempt.score || 0,
+      passed: attempt.passed || false,
+      completedAt: attempt.completedAt,
+      status: attempt.status,
+      correctAnswers: attempt.correctAnswers || 0,
+      totalQuestions: attempt.testId?.totalQuestions || 0
+    }));
+
+    res.json({
+      testsTaken,
+      averageScore: Math.round(averageScore * 10) / 10, // Round to 1 decimal place
+      totalTime,
+      recentTests
+    });
   } catch (error) {
     console.error('Error fetching user stats:', error);
     res.status(500).json({ error: 'Error fetching user stats' });
@@ -600,6 +645,173 @@ router.post('/login', verifyToken, async (req, res) => {
   } catch (error) {
     console.error('Error logging in user:', error);
     res.status(500).json({ error: 'Error logging in user' });
+  }
+});
+
+// Get user preferences
+router.get('/:id/preferences', verifyToken, async (req, res) => {
+  try {
+    console.log(`Fetching preferences for user with firebaseId: ${req.params.id}`);
+    
+    // Ensure the user can only access their own preferences
+    if (req.user.firebaseId !== req.params.id && !req.dbUser.isAdmin()) {
+      console.log(`Access denied: ${req.user.firebaseId} trying to access preferences for ${req.params.id}`);
+      return res.status(403).json({ error: 'You can only access your own preferences' });
+    }
+
+    const user = await User.findOne({ firebaseId: req.params.id });
+    if (!user) {
+      console.log(`User not found with firebaseId: ${req.params.id}`);
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    console.log(`User preferences found:`, user.preferences || {});
+    res.json(user.preferences || {});
+  } catch (error) {
+    console.error('Error fetching user preferences:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+      userId: req.params.id
+    });
+    res.status(500).json({ error: 'Error fetching user preferences', details: error.message });
+  }
+});
+
+// Update user preferences
+router.post('/:id/preferences', verifyToken, async (req, res) => {
+  try {
+    // Ensure the user can only update their own preferences
+    if (req.user.firebaseId !== req.params.id && !req.dbUser.isAdmin()) {
+      return res.status(403).json({ error: 'You can only update your own preferences' });
+    }
+
+    const user = await User.findOne({ firebaseId: req.params.id });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Initialize preferences if they don't exist
+    if (!user.preferences) {
+      user.preferences = {};
+    }
+
+    // Update preferences with the provided values
+    Object.keys(req.body).forEach(key => {
+      // Only update allowed preferences
+      if (['defaultCategory', 'defaultView', 'defaultSort'].includes(key)) {
+        user.preferences[key] = req.body[key];
+      }
+    });
+
+    await user.save();
+    res.json({ message: 'Preferences updated successfully', preferences: user.preferences });
+  } catch (error) {
+    console.error('Error updating user preferences:', error);
+    res.status(500).json({ error: 'Error updating user preferences' });
+  }
+});
+
+// Add user purchases endpoints
+
+// Get user's purchased test series
+router.get('/purchases/test-series', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findOne({ firebaseId: req.user.firebaseId })
+      .populate({
+        path: 'purchasedSeries.seriesId',
+        select: 'title category totalTests'
+      });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Return formatted purchased series data
+    const purchasedSeries = (user.purchasedSeries || []).map(item => {
+      const series = item.seriesId;
+      if (!series) return null; // Skip if series was deleted
+      
+      return {
+        _id: series._id,
+        title: series.title,
+        category: series.category,
+        totalTests: series.totalTests,
+        expiresAt: item.expiresAt,
+        purchaseId: item.purchaseId,
+        progress: {
+          completedTests: 0 // This would be calculated from test attempts in a real implementation
+        }
+      };
+    }).filter(Boolean); // Remove null entries
+    
+    res.json(purchasedSeries);
+  } catch (err) {
+    console.error('Error fetching user purchased series:', err);
+    res.status(500).json({ error: 'Failed to fetch purchased series' });
+  }
+});
+
+// Get user's purchased individual tests
+router.get('/purchases/tests', verifyToken, async (req, res) => {
+  try {
+    const user = await User.findOne({ firebaseId: req.user.firebaseId })
+      .populate({
+        path: 'purchasedTests.testId',
+        select: 'title subject category duration'
+      });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Return formatted purchased tests data
+    const purchasedTests = (user.purchasedTests || []).map(item => {
+      const test = item.testId;
+      if (!test) return null; // Skip if test was deleted
+      
+      return {
+        _id: test._id,
+        title: test.title,
+        subject: test.subject,
+        category: test.category,
+        duration: test.duration,
+        expiresAt: item.expiresAt,
+        purchaseId: item.purchaseId
+      };
+    }).filter(Boolean); // Remove null entries
+    
+    res.json(purchasedTests);
+  } catch (err) {
+    console.error('Error fetching user purchased tests:', err);
+    res.status(500).json({ error: 'Failed to fetch purchased tests' });
+  }
+});
+
+// Get user's purchases - generic endpoint that returns both test series and individual tests
+router.get('/purchases/:type', verifyToken, async (req, res) => {
+  try {
+    const { type } = req.params;
+    
+    if (type !== 'test-series' && type !== 'tests') {
+      return res.status(400).json({ error: 'Invalid purchase type. Use "test-series" or "tests".' });
+    }
+    
+    // Redirect to the appropriate endpoint
+    if (type === 'test-series') {
+      return router.handle(req, res, () => {
+        req.url = '/purchases/test-series';
+      });
+    } else {
+      return router.handle(req, res, () => {
+        req.url = '/purchases/tests';
+      });
+    }
+  } catch (err) {
+    console.error(`Error fetching user purchased ${req.params.type}:`, err);
+    res.status(500).json({ error: `Failed to fetch purchased ${req.params.type}` });
   }
 });
 

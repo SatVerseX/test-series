@@ -98,7 +98,7 @@ const LibraryPage = () => {
                 fontWeight: 400
               }}
             >
-              Access millions of books from the Library Genesis database
+              Access millions of books from the Vidya Library
             </Typography>
             
             <Divider sx={{ mb: 3, opacity: 0.5 }} />

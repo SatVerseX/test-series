@@ -24,14 +24,38 @@ const verifyToken = async (req, res, next) => {
     }
 
     console.log('Token found, verifying with Firebase Admin...');
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    console.log('Token verified successfully:', {
-      uid: decodedToken.uid,
-      email: decodedToken.email,
-      emailVerified: decodedToken.email_verified
-    });
+    let decodedToken;
+    try {
+      decodedToken = await admin.auth().verifyIdToken(token);
+      console.log('Token verified successfully:', {
+        uid: decodedToken.uid,
+        email: decodedToken.email,
+        emailVerified: decodedToken.email_verified
+      });
+    } catch (tokenError) {
+      console.error('Token verification failed:', {
+        name: tokenError.name,
+        message: tokenError.message,
+        code: tokenError.code,
+        stack: tokenError.stack
+      });
+      
+      // Specific error handling based on Firebase error codes
+      if (tokenError.code === 'auth/id-token-expired') {
+        return res.status(401).json({ error: 'Token expired' });
+      }
+      if (tokenError.code === 'auth/id-token-revoked') {
+        return res.status(401).json({ error: 'Token revoked' });
+      }
+      if (tokenError.code === 'auth/argument-error') {
+        return res.status(401).json({ error: 'Invalid token format' });
+      }
+      
+      return res.status(401).json({ error: 'Invalid token', details: tokenError.message });
+    }
 
     try {
+      console.log('Looking up user in database with firebaseId:', decodedToken.uid);
       const user = await User.findOne({ firebaseId: decodedToken.uid });
       if (!user) {
         console.log('User not found in database for firebaseId:', decodedToken.uid);
@@ -43,14 +67,20 @@ const verifyToken = async (req, res, next) => {
         role: user.role
       });
       req.user = user;
+      
+      // Always set req.dbUser to ensure it's available in routes
+      req.dbUser = user;
+      
       next();
     } catch (dbError) {
       console.error('Database error during user lookup:', {
         name: dbError.name,
         message: dbError.message,
-        code: dbError.code
+        code: dbError.code,
+        stack: dbError.stack,
+        uid: decodedToken?.uid
       });
-      return res.status(500).json({ error: 'Database error during authentication' });
+      return res.status(500).json({ error: 'Database error during authentication', details: dbError.message });
     }
   } catch (error) {
     console.error('=== Token Verification Failed ===');
@@ -70,7 +100,7 @@ const verifyToken = async (req, res, next) => {
     if (error.code === 'auth/id-token-invalid') {
       return res.status(401).json({ error: 'Invalid token' });
     }
-    return res.status(401).json({ error: 'Authentication failed' });
+    return res.status(401).json({ error: 'Authentication failed', details: error.message });
   }
 };
 
@@ -140,13 +170,14 @@ const isTeacher = async (req, res, next) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    if (!user.isTeacher()) {
-      return res.status(403).json({ error: 'Access denied. Teacher privileges required.' });
+    // Allow access if user is admin or teacher
+    if (user.role === 'admin' || user.isTeacher()) {
+      // Add user object to request for further use
+      req.dbUser = user;
+      return next();
     }
 
-    // Add user object to request for further use
-    req.dbUser = user;
-    next();
+    return res.status(403).json({ error: 'Access denied. Teacher privileges required.' });
   } catch (error) {
     console.error('Teacher check error:', error);
     return res.status(500).json({ error: 'Error checking teacher privileges' });

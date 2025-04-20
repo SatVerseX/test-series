@@ -20,6 +20,7 @@ import BookmarkIcon from '@mui/icons-material/Bookmark';
 import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { motion } from 'framer-motion';
+import { useAuth } from '../../contexts/AuthContext';
 
 const PLACEHOLDER_COVERS = [
   'https://images.unsplash.com/photo-1589998059171-988d887df646?auto=format&fit=crop&w=400&h=600',
@@ -33,80 +34,67 @@ const RecommendedBooks = ({ onSelectBook, userPreferences }) => {
   const [recommendations, setRecommendations] = useState([]);
   const [savedBooks, setSavedBooks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { api } = useAuth();
 
-  // Mock data for now - in real implementation, this would come from backend
+  // Fetch recommended books from API
   useEffect(() => {
-    // Simulate API call
-    setTimeout(() => {
-      const mockRecommendations = [
-        {
-          id: 'rec1',
-          title: 'Clean Code: A Handbook of Agile Software Craftsmanship',
-          author: 'Robert C. Martin',
-          year: '2008',
-          extension: 'pdf',
-          rating: 4.7,
-          coverIndex: 0,
-          category: 'Programming',
-          description: "Even bad code can function. But if code isn't clean, it can bring a development organization to its knees."
-        },
-        {
-          id: 'rec2',
-          title: 'Design Patterns: Elements of Reusable Object-Oriented Software',
-          author: 'Erich Gamma, Richard Helm, Ralph Johnson, John Vlissides',
-          year: '1994',
-          extension: 'epub',
-          rating: 4.6,
-          coverIndex: 1,
-          category: 'Software Architecture',
-          description: "Capturing a wealth of experience about the design of object-oriented software."
-        },
-        {
-          id: 'rec3',
-          title: 'The Pragmatic Programmer',
-          author: 'Andrew Hunt, David Thomas',
-          year: '2019',
-          extension: 'pdf',
-          rating: 4.8,
-          coverIndex: 2,
-          category: 'Programming',
-          description: "Journey to mastery: A guide filled with practical advice, both technical and professional."
-        },
-        {
-          id: 'rec4',
-          title: 'Refactoring: Improving the Design of Existing Code',
-          author: 'Martin Fowler',
-          year: '2018',
-          extension: 'pdf',
-          rating: 4.5,
-          coverIndex: 3,
-          category: 'Software Development',
-          description: "Learn how to improve your code's design to make it more maintainable."
-        },
-        {
-          id: 'rec5',
-          title: 'JavaScript: The Good Parts',
-          author: 'Douglas Crockford',
-          year: '2008',
-          extension: 'epub',
-          rating: 4.4,
-          coverIndex: 4,
-          category: 'Web Development',
-          description: "Unearthing the excellent programming language inside JavaScript."
+    const fetchRecommendedBooks = async () => {
+      try {
+        setLoading(true);
+        
+        // Real API call to get recommended books
+        const response = await api.get('/api/books/recommendations', {
+          params: {
+            preferences: userPreferences
+          }
+        });
+        
+        if (response.data && response.data.length > 0) {
+          setRecommendations(response.data);
+        } else {
+          setRecommendations([]);
         }
-      ];
-      
-      setRecommendations(mockRecommendations);
-      setLoading(false);
-    }, 1500);
-  }, [userPreferences]);
+      } catch (error) {
+        console.error('Error fetching recommended books:', error);
+        setRecommendations([]);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  const handleSaveBook = (book, event) => {
+    fetchRecommendedBooks();
+  }, [api, userPreferences]);
+
+  // Fetch user's saved books
+  useEffect(() => {
+    const fetchSavedBooks = async () => {
+      try {
+        const response = await api.get('/api/books/saved');
+        if (response.data) {
+          setSavedBooks(response.data);
+        }
+      } catch (error) {
+        console.error('Error fetching saved books:', error);
+      }
+    };
+
+    fetchSavedBooks();
+  }, [api]);
+
+  const handleSaveBook = async (book, event) => {
     event.stopPropagation();
-    if (savedBooks.some(savedBook => savedBook.id === book.id)) {
-      setSavedBooks(savedBooks.filter(savedBook => savedBook.id !== book.id));
-    } else {
-      setSavedBooks([...savedBooks, book]);
+    try {
+      const isSaved = savedBooks.some(savedBook => savedBook.id === book.id);
+      
+      if (isSaved) {
+        await api.delete(`/api/books/saved/${book.id}`);
+        setSavedBooks(savedBooks.filter(savedBook => savedBook.id !== book.id));
+      } else {
+        await api.post('/api/books/saved', { bookId: book.id });
+        setSavedBooks([...savedBooks, book]);
+      }
+    } catch (error) {
+      console.error('Error updating saved books:', error);
     }
   };
 
@@ -184,6 +172,14 @@ const RecommendedBooks = ({ onSelectBook, userPreferences }) => {
               </Card>
             </Grid>
           ))
+        ) : recommendations.length === 0 ? (
+          <Grid item xs={12}>
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography variant="body1" color="text.secondary">
+                No recommended books available at the moment.
+              </Typography>
+            </Box>
+          </Grid>
         ) : (
           recommendations.map((book, index) => (
             <Grid item xs={12} sm={6} md={4} lg={2.4} key={book.id}>
@@ -235,7 +231,7 @@ const RecommendedBooks = ({ onSelectBook, userPreferences }) => {
                       <CardMedia
                         component="img"
                         height="200"
-                        image={PLACEHOLDER_COVERS[book.coverIndex]}
+                        image={book.coverUrl || PLACEHOLDER_COVERS[index % PLACEHOLDER_COVERS.length]}
                         alt={book.title}
                         sx={{ objectFit: 'cover' }}
                       />

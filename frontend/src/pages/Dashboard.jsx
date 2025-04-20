@@ -8,22 +8,41 @@ import {
   CircularProgress,
   Button,
   Alert,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Chip,
 } from "@mui/material";
 import { useAuth } from "../contexts/AuthContext";
+import { useExamCategory } from "../contexts/ExamCategoryContext";
 import { useNavigate } from "react-router-dom";
 import Leaderboard from "../components/leaderboard/Leaderboard";
-import api from "../config/api";
+import CategoryWelcome from "../components/dashboard/CategoryWelcome";
+import { formatDistanceToNow } from 'date-fns';
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, api } = useAuth();
+  const { selectedCategory, loading: categoryLoading } = useExamCategory();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showCategoryWelcome, setShowCategoryWelcome] = useState(false);
   const [stats, setStats] = useState({
     testsTaken: 0,
     averageScore: 0,
     totalTime: 0,
+    recentTests: []
   });
+
+  // Check if we need to show category welcome
+  useEffect(() => {
+    if (!categoryLoading && user && !selectedCategory) {
+      setShowCategoryWelcome(true);
+    }
+  }, [categoryLoading, user, selectedCategory]);
 
   useEffect(() => {
     const fetchUserStats = async () => {
@@ -35,6 +54,7 @@ const Dashboard = () => {
       try {
         setLoading(true);
         const response = await api.get(`/api/users/${user.firebaseId}/stats`);
+        console.log('User stats received:', response.data);
         setStats(response.data);
         setError(null);
       } catch (error) {
@@ -46,9 +66,20 @@ const Dashboard = () => {
     };
 
     fetchUserStats();
-  }, [user, navigate]);
+  }, [user, navigate, api]);
 
-  if (loading) {
+  const formatDate = (dateString) => {
+    if (!dateString) return "N/A";
+    try {
+      const date = new Date(dateString);
+      return formatDistanceToNow(date, { addSuffix: true });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return dateString;
+    }
+  };
+
+  if (loading || categoryLoading) {
     return (
       <Box
         display="flex"
@@ -58,6 +89,15 @@ const Dashboard = () => {
       >
         <CircularProgress />
       </Box>
+    );
+  }
+
+  // Show category welcome if needed
+  if (showCategoryWelcome) {
+    return (
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        <CategoryWelcome onComplete={() => setShowCategoryWelcome(false)} />
+      </Container>
     );
   }
 
@@ -136,6 +176,14 @@ const Dashboard = () => {
                 Take a Test
               </Button>
               <Button
+                variant="contained"
+                color="secondary"
+                onClick={() => navigate("/tests/categories")}
+                fullWidth
+              >
+                Browse Tests by Category
+              </Button>
+              <Button
                 variant="outlined"
                 color="primary"
                 onClick={() => navigate("/leaderboard")}
@@ -153,9 +201,74 @@ const Dashboard = () => {
             <Typography variant="h6" gutterBottom>
               Recent Tests
             </Typography>
-            <Typography variant="body1" color="text.secondary">
-              No recent tests to display
-            </Typography>
+            {stats.recentTests && stats.recentTests.length > 0 ? (
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Test Name</TableCell>
+                      <TableCell>Subject</TableCell>
+                      <TableCell align="center">Score</TableCell>
+                      <TableCell align="center">Status</TableCell>
+                      <TableCell align="right">Date</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {stats.recentTests.map(test => (
+                      <TableRow 
+                        key={test.id}
+                        hover
+                        onClick={() => {
+                          if (test.status === 'completed') {
+                            navigate(`/test-results/${test.testId}/${user.firebaseId}`);
+                          } else if (test.status === 'in_progress') {
+                            navigate(`/test-attempt/${test.testId}`);
+                          }
+                        }}
+                        sx={{ cursor: 'pointer' }}
+                      >
+                        <TableCell>{test.title}</TableCell>
+                        <TableCell>{test.subject}</TableCell>
+                        <TableCell align="center">
+                          {test.status === 'completed' ? (
+                            <>
+                              {`${test.score.toFixed(0)}%`}
+                              {test.correctAnswers && test.totalQuestions && (
+                                <Typography variant="caption" display="block" color="text.secondary">
+                                  ({test.correctAnswers}/{test.totalQuestions} pts)
+                                </Typography>
+                              )}
+                            </>
+                          ) : '-'}
+                        </TableCell>
+                        <TableCell align="center">
+                          {test.status === 'completed' ? (
+                            <Chip 
+                              size="small"
+                              label={test.passed ? "Passed" : "Failed"}
+                              color={test.passed ? "success" : "error"}
+                            />
+                          ) : (
+                            <Chip 
+                              size="small"
+                              label={test.status === 'in_progress' ? "In Progress" : test.status}
+                              color="warning"
+                            />
+                          )}
+                        </TableCell>
+                        <TableCell align="right">
+                          {formatDate(test.completedAt)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            ) : (
+              <Typography variant="body1" color="text.secondary">
+                No recent tests to display
+              </Typography>
+            )}
           </Paper>
         </Grid>
 

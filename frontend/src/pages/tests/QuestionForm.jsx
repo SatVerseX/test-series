@@ -12,7 +12,10 @@ import {
   IconButton,
   Divider,
   Grid,
-  FormHelperText
+  FormHelperText,
+  Radio,
+  RadioGroup,
+  FormControlLabel
 } from '@mui/material';
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import { toast } from 'react-toastify';
@@ -21,7 +24,10 @@ const QuestionForm = ({ onSubmit }) => {
   const [question, setQuestion] = useState({
     text: '',
     type: 'mcq',
-    options: ['', ''],
+    options: [
+      { text: '', isCorrect: false },
+      { text: '', isCorrect: false }
+    ],
     correctAnswer: '',
     explanation: '',
     marks: 1
@@ -37,17 +43,34 @@ const QuestionForm = ({ onSubmit }) => {
 
   const handleOptionChange = (index, value) => {
     const newOptions = [...question.options];
-    newOptions[index] = value;
+    newOptions[index] = { ...newOptions[index], text: value };
     setQuestion(prev => ({
       ...prev,
       options: newOptions
     }));
   };
 
+  const handleCorrectOptionChange = (index) => {
+    // Update the isCorrect flag for all options
+    const newOptions = question.options.map((option, i) => ({
+      ...option,
+      isCorrect: i === index
+    }));
+    
+    // Also update correctAnswer to match the selected option's text
+    const correctOptionText = newOptions[index].text;
+    
+    setQuestion(prev => ({
+      ...prev,
+      options: newOptions,
+      correctAnswer: correctOptionText
+    }));
+  };
+
   const handleAddOption = () => {
     setQuestion(prev => ({
       ...prev,
-      options: [...prev.options, '']
+      options: [...prev.options, { text: '', isCorrect: false }]
     }));
   };
 
@@ -56,9 +79,23 @@ const QuestionForm = ({ onSubmit }) => {
       toast.error('MCQ must have at least 2 options');
       return;
     }
+    
+    const newOptions = question.options.filter((_, i) => i !== index);
+    
+    // If we're removing the correct option, reset correctAnswer
+    const wasCorrect = question.options[index].isCorrect;
+    let updatedCorrectAnswer = question.correctAnswer;
+    
+    if (wasCorrect && newOptions.length > 0) {
+      // Make the first option correct by default
+      newOptions[0].isCorrect = true;
+      updatedCorrectAnswer = newOptions[0].text;
+    }
+    
     setQuestion(prev => ({
       ...prev,
-      options: prev.options.filter((_, i) => i !== index)
+      options: newOptions,
+      correctAnswer: updatedCorrectAnswer
     }));
   };
 
@@ -76,9 +113,18 @@ const QuestionForm = ({ onSubmit }) => {
         toast.error('MCQ must have at least 2 options');
         return;
       }
-      if (!question.options.includes(question.correctAnswer)) {
-        toast.error('Correct answer must be one of the options');
+      
+      // Check if at least one option is marked as correct
+      const hasCorrectOption = question.options.some(option => option.isCorrect);
+      if (!hasCorrectOption) {
+        toast.error('Please select a correct answer');
         return;
+      }
+      
+      // Make sure correctAnswer matches the text of the correct option
+      const correctOption = question.options.find(option => option.isCorrect);
+      if (correctOption) {
+        question.correctAnswer = correctOption.text;
       }
     } else if (!question.correctAnswer) {
       toast.error('Correct answer is required');
@@ -91,7 +137,10 @@ const QuestionForm = ({ onSubmit }) => {
     setQuestion({
       text: '',
       type: 'mcq',
-      options: ['', ''],
+      options: [
+        { text: '', isCorrect: false },
+        { text: '', isCorrect: false }
+      ],
       correctAnswer: '',
       explanation: '',
       marks: 1
@@ -124,8 +173,8 @@ const QuestionForm = ({ onSubmit }) => {
               label="Question Type"
             >
               <MenuItem value="mcq">Multiple Choice</MenuItem>
-              <MenuItem value="true_false">True/False</MenuItem>
-              <MenuItem value="short_answer">Short Answer</MenuItem>
+              <MenuItem value="trueFalse">True/False</MenuItem>
+              <MenuItem value="shortAnswer">Short Answer</MenuItem>
               <MenuItem value="integer">Integer</MenuItem>
             </Select>
           </FormControl>
@@ -150,23 +199,34 @@ const QuestionForm = ({ onSubmit }) => {
               <Typography variant="subtitle1" gutterBottom>
                 Options
               </Typography>
-              {question.options.map((option, index) => (
-                <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1 }}>
-                  <TextField
-                    fullWidth
-                    label={`Option ${index + 1}`}
-                    value={option}
-                    onChange={(e) => handleOptionChange(index, e.target.value)}
-                    required
-                  />
-                  <IconButton
-                    onClick={() => handleRemoveOption(index)}
-                    disabled={question.options.length <= 2}
-                  >
-                    <DeleteIcon />
-                  </IconButton>
-                </Box>
-              ))}
+              <RadioGroup 
+                value={question.options.findIndex(opt => opt.isCorrect)}
+                onChange={(e) => handleCorrectOptionChange(parseInt(e.target.value))}
+              >
+                {question.options.map((option, index) => (
+                  <Box key={index} sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
+                    <FormControlLabel
+                      value={index}
+                      control={<Radio />}
+                      label=""
+                      sx={{ margin: 0 }}
+                    />
+                    <TextField
+                      fullWidth
+                      label={`Option ${index + 1}`}
+                      value={option.text}
+                      onChange={(e) => handleOptionChange(index, e.target.value)}
+                      required
+                    />
+                    <IconButton
+                      onClick={() => handleRemoveOption(index)}
+                      disabled={question.options.length <= 2}
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  </Box>
+                ))}
+              </RadioGroup>
               <Button
                 startIcon={<AddIcon />}
                 onClick={handleAddOption}
@@ -178,25 +238,25 @@ const QuestionForm = ({ onSubmit }) => {
           </Grid>
         )}
 
-        <Grid item xs={12}>
-          <TextField
-            fullWidth
-            label="Correct Answer"
-            name="correctAnswer"
-            value={question.correctAnswer}
-            onChange={handleChange}
-            required
-            helperText={
-              question.type === 'mcq'
-                ? 'Select one of the options above'
-                : question.type === 'true_false'
-                ? 'Enter "true" or "false"'
-                : question.type === 'integer'
-                ? 'Enter a whole number'
-                : 'Enter the correct answer'
-            }
-          />
-        </Grid>
+        {question.type !== 'mcq' && (
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="Correct Answer"
+              name="correctAnswer"
+              value={question.correctAnswer}
+              onChange={handleChange}
+              required
+              helperText={
+                question.type === 'trueFalse'
+                  ? 'Enter "true" or "false"'
+                  : question.type === 'integer'
+                  ? 'Enter a whole number'
+                  : 'Enter the correct answer'
+              }
+            />
+          </Grid>
+        )}
 
         <Grid item xs={12}>
           <TextField

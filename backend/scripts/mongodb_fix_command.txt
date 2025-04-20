@@ -1,0 +1,26 @@
+// MongoDB update command to fix the test attempt
+// Copy and paste this into your MongoDB shell or MongoDB Compass
+
+// 1. Mark the test attempt as completed
+db.testattempts.updateOne(
+  { _id: ObjectId("68052fa49f3564a83d8245ba") },
+  { 
+    $set: { 
+      status: "completed",
+      completedAt: new Date(),
+    }
+  }
+);
+
+// 2. After the status is updated, you can recalculate the score by viewing 
+// the test result in the UI, or run this update:
+db.testattempts.updateOne(
+  { _id: ObjectId("68052fa49f3564a83d8245ba") },
+  { 
+    $set: { 
+      score: 70,        // Replace with the actual score
+      correctAnswers: 7, // Replace with the actual number of correct answers
+      passed: true       // Set to true if score >= passingScore
+    }
+  }
+); 

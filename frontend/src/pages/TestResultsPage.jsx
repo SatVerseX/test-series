@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Container, Typography, Box, CircularProgress, Paper, Divider, Grid, Button, 
   Chip, useMediaQuery, useTheme, Avatar, IconButton, LinearProgress, Tooltip,
-  SpeedDial, SpeedDialIcon, SpeedDialAction, Collapse
+  SpeedDial, SpeedDialIcon, SpeedDialAction, Collapse, Card, CardContent
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
@@ -43,31 +43,28 @@ const TestResultsPage = () => {
     const fetchTestResults = async () => {
       setLoading(true);
       try {
+        // First fetch the test data
         const testResponse = await api.get(`/api/tests/${testId}`);
+        if (!testResponse.data) {
+          throw new Error('Test not found');
+        }
         setTestData(testResponse.data);
 
+        // Then fetch the attempt data using the correct endpoint
         const attemptResponse = await api.get(`/api/tests/${testId}/attempts/${userId}`);
+        if (!attemptResponse.data) {
+          throw new Error('Test attempt not found');
+        }
         setTestAttempt(attemptResponse.data);
 
-        // Calculate if the test should be passed based on percentage
-        const correctAnswers = testResponse.data.questions.filter(q => {
-          const userAnswer = attemptResponse.data.answers[q._id];
-          return isAnswerCorrect(q, userAnswer);
-        }).length;
-        
-        const totalQuestions = testResponse.data.questions.length;
-        const percentageScore = (correctAnswers / totalQuestions) * 100;
-        const passingScore = testResponse.data.passingScore || 60; // Use test's passing score or default to 60%
-        
-        // Update the test attempt if the passed status is incorrect
-        if ((percentageScore >= passingScore) !== attemptResponse.data.passed) {
-          await api.put(`/api/tests/${testId}/attempts/${userId}/update-status`, {
-            passed: percentageScore >= passingScore
-          });
-        }
+        // Calculate score and check if passed
+        const attempt = attemptResponse.data;
+        const score = attempt.score || 0;
+        const passingScore = testResponse.data.passingScore || 60;
+        const isPassed = score >= passingScore;
 
-        // Trigger confetti for high scores
-        if (percentageScore >= 80) {
+        // Show confetti for passing scores
+        if (isPassed && score >= 80) {
           setTimeout(() => {
             confetti({
               particleCount: 100,
@@ -76,15 +73,26 @@ const TestResultsPage = () => {
             });
           }, 1000);
         }
+
+        // Update attempt status if needed
+        if (attempt.isPassed !== isPassed) {
+          await api.put(`/api/tests/${testId}/attempts/${userId}/update-status`, {
+            status: 'completed',
+            passed: isPassed
+          });
+        }
+
       } catch (err) {
         console.error('Error fetching test results:', err);
-        setError('Failed to load test results. Please try again later.');
+        setError(err.response?.data?.message || 'Failed to load test results. Please try again later.');
       } finally {
         setLoading(false);
       }
     };
 
+    if (testId && userId) {
     fetchTestResults();
+    }
   }, [testId, userId]);
 
   const getBadgeInfo = (score) => {
@@ -267,19 +275,25 @@ const TestResultsPage = () => {
     }
   };
 
-  // Helper function to determine if an answer is correct
+  // Helper function to check if an answer is correct
   const isAnswerCorrect = (question, userAnswer) => {
-    if (userAnswer === null || userAnswer === undefined) return false;
+    if (!userAnswer) return false;
     
-    if (question.type === 'mcq' || question.type === 'trueFalse') {
+    // Handle different question types
+    switch (question.type) {
+      case 'mcq':
+      case 'multiple_choice':
       return userAnswer === question.correctAnswer;
-    } else if (question.type === 'shortAnswer') {
-      return userAnswer.toLowerCase().trim() === question.correctAnswer.toLowerCase().trim();
-    } else if (question.type === 'integer') {
-      return parseInt(userAnswer) === parseInt(question.correctAnswer);
-    }
-    // Default comparison
+      case 'multiple_select':
+        const correctAnswers = question.correctAnswer.split(',');
+        const userAnswers = userAnswer.split(',');
+        return correctAnswers.length === userAnswers.length && 
+               correctAnswers.every(ans => userAnswers.includes(ans));
+      case 'trueFalse':
+        return userAnswer.toLowerCase() === question.correctAnswer.toLowerCase();
+      default:
     return userAnswer === question.correctAnswer;
+    }
   };
 
   // Helper function to determine score color
@@ -337,782 +351,274 @@ const TestResultsPage = () => {
     }
   };
 
+  // Add new premium styles
+  const premiumStyles = {
+    gradientText: {
+      background: 'linear-gradient(45deg, #FF6B6B, #4ECDC4)',
+      WebkitBackgroundClip: 'text',
+      WebkitTextFillColor: 'transparent',
+      fontWeight: 'bold'
+    },
+    glassCard: {
+      background: 'rgba(255, 255, 255, 0.1)',
+      backdropFilter: 'blur(10px)',
+      borderRadius: '16px',
+      border: '1px solid rgba(255, 255, 255, 0.2)',
+      boxShadow: '0 4px 30px rgba(0, 0, 0, 0.1)'
+    },
+    scoreCircle: {
+      position: 'relative',
+      width: '200px',
+      height: '200px',
+      margin: '0 auto',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: '50%',
+      background: 'conic-gradient(from 0deg, var(--score-color) var(--score-percent), transparent var(--score-percent))',
+      animation: 'rotate 2s ease-out forwards'
+    },
+    statCard: {
+      transition: 'transform 0.3s ease, box-shadow 0.3s ease',
+      '&:hover': {
+        transform: 'translateY(-5px)',
+        boxShadow: '0 8px 30px rgba(0, 0, 0, 0.2)'
+      }
+    }
+  };
+
   if (loading) {
     return (
-      <Container sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+      <Container sx={{ py: 4, textAlign: 'center' }}>
         <CircularProgress />
+        <Typography sx={{ mt: 2 }}>Loading test results...</Typography>
       </Container>
     );
   }
 
   if (error) {
     return (
-      <Container sx={{ mt: 4 }}>
-        <Typography color="error" variant="h5" align="center">
-          {error}
-        </Typography>
+      <Container sx={{ py: 4, textAlign: 'center' }}>
+        <Typography color="error">{error}</Typography>
+        <Button 
+          variant="contained" 
+          onClick={() => navigate('/tests')} 
+          sx={{ mt: 2 }}
+        >
+          Back to Tests
+        </Button>
       </Container>
     );
   }
 
   if (!testData || !testAttempt) {
     return (
-      <Container sx={{ mt: 4 }}>
-        <Typography variant="h5" align="center">
-          Test results not found.
-        </Typography>
+      <Container sx={{ py: 4, textAlign: 'center' }}>
+        <Typography>No test results found.</Typography>
+        <Button 
+          variant="contained" 
+          onClick={() => navigate('/tests')} 
+          sx={{ mt: 2 }}
+        >
+          Back to Tests
+        </Button>
       </Container>
     );
   }
 
-  const { title, subject, questions } = testData;
-  const { answers, completedAt, updatedAt, createdAt } = testAttempt;
-  
-  const correctAnswers = questions.filter(q => isAnswerCorrect(q, answers[q._id])).length;
-  const totalQuestions = questions.length;
-  const incorrectAnswers = totalQuestions - correctAnswers;
-  const percentage = (correctAnswers / totalQuestions) * 100;
-  
-  const submissionDate = completedAt || updatedAt || createdAt;
-  const formattedDate = submissionDate 
-    ? format(new Date(submissionDate), 'PPpp') 
-    : 'Not available';
-
-  const badgeInfo = getBadgeInfo(percentage);
-  const badgeColorScheme = getColorScheme('badge', percentage);
-  const statsColorScheme = getColorScheme('stats', percentage);
-  const timeColorScheme = getColorScheme('time', percentage);
-  const recommendationsColorScheme = getColorScheme('recommendations', percentage);
-  const summaryColorScheme = getColorScheme('summary', percentage);
-  const reviewColorScheme = getColorScheme('review', percentage);
-  const averageTimePerQuestion = Math.round((new Date(completedAt) - new Date(createdAt)) / (totalQuestions * 1000));
+  const score = testAttempt.score || 0;
+  const correctAnswers = testAttempt.correctAnswers || 0;
+  const totalQuestions = testData.questions?.length || 0;
+  const timeTaken = testAttempt.timeTaken || 0;
+  const averageTimePerQuestion = totalQuestions ? Math.round(timeTaken / totalQuestions) : 0;
+  const completionSpeed = averageTimePerQuestion > 180 ? 'Slow' : averageTimePerQuestion > 90 ? 'Moderate' : 'Fast';
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
+        transition={{ duration: 0.5 }}
       >
-        {/* Achievement Badge */}
         <Paper 
           elevation={3} 
           sx={{ 
-            p: { xs: 2, md: 4 }, 
-            mb: 4, 
-            borderRadius: 3,
+            ...premiumStyles.glassCard,
+            p: 4,
             background: theme.palette.mode === 'dark'
-              ? `linear-gradient(135deg, ${badgeColorScheme.light} 0%, ${theme.palette.background.paper} 100%)`
-              : `linear-gradient(135deg, ${badgeColorScheme.light} 0%, #ffffff 100%)`,
-            boxShadow: `0 10px 40px ${badgeColorScheme.medium}`,
-            position: 'relative',
-            overflow: 'hidden'
+              ? 'linear-gradient(135deg, rgba(66, 66, 66, 0.9), rgba(33, 33, 33, 0.95))'
+              : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(240, 240, 240, 0.9))'
           }}
         >
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 260, damping: 20 }}
-          >
-            <Box sx={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              flexDirection: 'column',
-              gap: 2,
-              mb: 3
-            }}>
-              <Avatar 
-                sx={{ 
-                  width: percentage === 100 ? 100 : 80, 
-                  height: percentage === 100 ? 100 : 80,
-                  background: badgeColorScheme.gradient,
-                  boxShadow: badgeColorScheme.shadow,
-                  border: badgeColorScheme.border,
-                  position: 'relative',
-                  '&::after': percentage === 100 ? {
-                    content: '""',
-                    position: 'absolute',
-                    top: -5,
-                    left: -5,
-                    right: -5,
-                    bottom: -5,
-                    borderRadius: '50%',
-                    background: 'transparent',
-                    border: '2px solid rgba(255, 255, 255, 0.5)',
-                    animation: 'pulse 2s infinite'
-                  } : {}
-                }}
-              >
-                <EmojiEventsIcon sx={{ 
-                  fontSize: percentage === 100 ? 50 : 40,
-                  color: percentage === 100 ? '#FFFFFF' : 'inherit',
-                  filter: percentage === 100 ? 'drop-shadow(0 0 5px rgba(255, 255, 255, 0.6))' : 'none'
-                }} />
-              </Avatar>
               <Typography 
-                variant="h4" 
-                sx={{ 
-                  fontWeight: 'bold',
-                  color: badgeColorScheme.primary,
-                  textAlign: 'center',
-                  ...(badgeInfo.textGradient && {
-                    background: badgeInfo.textGradient,
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
-                    textShadow: '0 2px 5px rgba(0, 0, 0, 0.2)'
-                  }),
-                  ...(badgeInfo.glow && {
-                    textShadow: badgeInfo.glow
-                  }),
-                  animation: percentage === 100 ? 'shimmer 2s infinite' : 'none',
-                  '& .star-emoji': styles.starEmoji
-                }}
-                dangerouslySetInnerHTML={{ __html: badgeInfo.title }}
-              />
-            </Box>
-          </motion.div>
-
-          <Grid container spacing={3} alignItems="center">
-            <Grid item xs={12} md={4}>
-              <Box sx={{ 
-                position: 'relative',
-                width: 250,
-                height: 250,
-                margin: 'auto'
-              }}>
-                <CircularProgress
-                  variant="determinate"
-                  value={100}
-                  size={250}
-                  thickness={4}
-                  sx={{
-                    color: theme.palette.grey[200],
-                    position: 'absolute',
-                    top: 0,
-                    left: 0
-                  }}
-                />
-                <motion.div
-                  initial={{ strokeDashoffset: 100 }}
-                  animate={{ strokeDashoffset: 100 - percentage }}
-                  transition={{ duration: 2, ease: "easeOut" }}
-                >
-                  <CircularProgress
-                    variant="determinate"
-                    value={percentage}
-                    size={250}
-                    thickness={4}
-                    sx={{
-                      color: badgeColorScheme.primary,
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      '& .MuiCircularProgress-circle': {
-                        strokeLinecap: 'round',
-                      }
-                    }}
-                  />
-                </motion.div>
-                <Box sx={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  <Typography variant="h2" sx={{ 
-                    fontWeight: 'bold',
-                    color: badgeColorScheme.primary
-                  }}>
-                    <CountUp 
-                      end={percentage} 
-                      duration={2} 
-                      suffix="%" 
-                      decimals={0}
-                    />
-                  </Typography>
-                  <Typography variant="body1" sx={{ color: 'text.secondary' }}>
-                    {correctAnswers}/{totalQuestions} points
-                  </Typography>
-                </Box>
-              </Box>
-            </Grid>
-
-            <Grid item xs={12} md={8}>
-              <Grid container spacing={2}>
-                {/* Performance Stats */}
-                <Grid item xs={12} sm={6}>
-                  <Paper sx={{ 
-                    p: 2, 
-                    borderRadius: 2,
-                    background: theme.palette.mode === 'dark'
-                      ? `linear-gradient(135deg, ${statsColorScheme.light} 0%, ${theme.palette.background.paper} 100%)`
-                      : `linear-gradient(135deg, ${statsColorScheme.light} 0%, #ffffff 100%)`,
-                    height: '100%',
-                    border: `1px solid ${statsColorScheme.light}`
-                  }}>
-                    <Typography variant="h6" gutterBottom sx={{ color: statsColorScheme.primary }}>
-                      Correct Answers
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckCircleIcon sx={{ color: statsColorScheme.primary }} />
-                      <Typography variant="h4" sx={{ fontWeight: 'bold', color: statsColorScheme.primary }}>
-                        <CountUp end={correctAnswers} duration={2} />
-                      </Typography>
-                      <Typography variant="body1" sx={{ color: 'text.secondary' }}>
-                        / {totalQuestions}
-                      </Typography>
-                    </Box>
-                    <LinearProgress 
-                      variant="determinate" 
-                      value={(correctAnswers/totalQuestions) * 100}
-                      sx={{ 
-                        mt: 1,
-                        height: 8,
-                        borderRadius: 4,
-                        backgroundColor: statsColorScheme.light,
-                        '& .MuiLinearProgress-bar': {
-                          backgroundColor: statsColorScheme.primary
-                        }
-                      }}
-                    />
-                  </Paper>
-                </Grid>
-
-                <Grid item xs={12} sm={6}>
-                  <Paper sx={{ 
-                    p: 2, 
-                    borderRadius: 2,
-                    background: theme.palette.mode === 'dark'
-                      ? `linear-gradient(135deg, ${statsColorScheme.light} 0%, ${theme.palette.background.paper} 100%)`
-                      : `linear-gradient(135deg, ${statsColorScheme.light} 0%, #ffffff 100%)`,
-                    height: '100%',
-                    border: `1px solid ${statsColorScheme.light}`
-                  }}>
-                    <Typography variant="h6" gutterBottom sx={{ color: statsColorScheme.primary }}>
-                      Incorrect Answers
-                    </Typography>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CancelIcon sx={{ color: statsColorScheme.primary }} />
-                      <Typography variant="h4" sx={{ fontWeight: 'bold', color: statsColorScheme.primary }}>
-                        <CountUp end={incorrectAnswers} duration={2} />
-                      </Typography>
-                      <Typography variant="body1" sx={{ color: 'text.secondary' }}>
-                        / {totalQuestions}
-                      </Typography>
-                    </Box>
-                    <LinearProgress 
-                      variant="determinate" 
-                      value={(incorrectAnswers/totalQuestions) * 100}
-                      sx={{ 
-                        mt: 1,
-                        height: 8,
-                        borderRadius: 4,
-                        backgroundColor: statsColorScheme.light,
-                        '& .MuiLinearProgress-bar': {
-                          backgroundColor: statsColorScheme.primary
-                        }
-                      }}
-                    />
-                  </Paper>
-                </Grid>
-
-                {/* Time Analysis */}
-                <Grid item xs={12}>
-                  <Paper sx={{ 
-                    p: 2, 
-                    borderRadius: 2,
-                    background: theme.palette.mode === 'dark'
-                      ? `linear-gradient(135deg, ${timeColorScheme.light} 0%, ${theme.palette.background.paper} 100%)`
-                      : `linear-gradient(135deg, ${timeColorScheme.light} 0%, #ffffff 100%)`,
-                    border: `1px solid ${timeColorScheme.light}`
-                  }}>
-                    <Typography variant="h6" gutterBottom sx={{ color: timeColorScheme.primary }}>
-                      Time Analysis
-                    </Typography>
-                    <Grid container spacing={2}>
-                      <Grid item xs={6} sm={4}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <TimerIcon sx={{ color: timeColorScheme.primary, fontSize: 32, mb: 1 }} />
-                          <Typography variant="body2" color="text.secondary">
-                            Average Time per Question
-                          </Typography>
-                          <Typography variant="h6" sx={{ color: timeColorScheme.primary, fontWeight: 'bold' }}>
-                            {averageTimePerQuestion} sec
-                          </Typography>
-                        </Box>
-                      </Grid>
-                      <Grid item xs={6} sm={4}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <SpeedIcon sx={{ color: timeColorScheme.primary, fontSize: 32, mb: 1 }} />
-                          <Typography variant="body2" color="text.secondary">
-                            Completion Speed
-                          </Typography>
-                          <Typography variant="h6" sx={{ color: timeColorScheme.primary, fontWeight: 'bold' }}>
-                            {averageTimePerQuestion < 30 ? 'Fast' : averageTimePerQuestion < 60 ? 'Average' : 'Slow'}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                      <Grid item xs={12} sm={4}>
-                        <Box sx={{ textAlign: 'center' }}>
-                          <TimelineIcon sx={{ color: timeColorScheme.primary, fontSize: 32, mb: 1 }} />
-                          <Typography variant="body2" color="text.secondary">
-                            Total Time
-                          </Typography>
-                          <Typography variant="h6" sx={{ color: timeColorScheme.primary, fontWeight: 'bold' }}>
-                            {Math.round((new Date(completedAt) - new Date(createdAt)) / 60000)} min
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    </Grid>
-                  </Paper>
-                </Grid>
-              </Grid>
-            </Grid>
-          </Grid>
-
-          {/* Study Recommendations */}
-          <Box sx={{ mt: 4 }}>
-            <Typography variant="h6" gutterBottom sx={{ color: recommendationsColorScheme.primary }}>
-              Study Recommendations
-            </Typography>
-            <Grid container spacing={2}>
-              {incorrectAnswers > 0 && questions.map((question, index) => {
-                if (!isAnswerCorrect(question, answers[question._id])) {
-                  return (
-                    <Grid item xs={12} sm={6} md={4} key={question._id}>
-                      <Paper sx={{ 
-                        p: 2, 
-                        borderRadius: 2,
-                        background: theme.palette.mode === 'dark'
-                          ? `linear-gradient(135deg, ${recommendationsColorScheme.light} 0%, ${theme.palette.background.paper} 100%)`
-                          : `linear-gradient(135deg, ${recommendationsColorScheme.light} 0%, #ffffff 100%)`,
-                        border: `1px solid ${recommendationsColorScheme.light}`
-                      }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                          <MenuBookIcon sx={{ color: recommendationsColorScheme.primary }} />
-                          <Typography variant="subtitle1" sx={{ color: recommendationsColorScheme.primary, fontWeight: 'bold' }}>
-                            Topic {index + 1}
-                          </Typography>
-                        </Box>
-                        <Typography variant="body2" color="text.secondary">
-                          Review: {question.topic || 'General Knowledge'}
-                        </Typography>
-                      </Paper>
-                    </Grid>
-                  );
-                }
-                return null;
-              })}
-            </Grid>
-          </Box>
-        </Paper>
-
-        {/* Share Results */}
-        <SpeedDial
-          ariaLabel="Share Results"
-          sx={{ 
-            position: 'fixed', 
-            bottom: 16, 
-            right: 16,
-            '& .MuiFab-primary': {
-              bgcolor: badgeColorScheme.primary,
-              '&:hover': {
-                bgcolor: badgeColorScheme.primary
-              }
-            }
-          }}
-          icon={<SpeedDialIcon />}
-        >
-          <SpeedDialAction
-            icon={<FacebookIcon />}
-            tooltipTitle="Share on Facebook"
-            onClick={() => shareResult('facebook')}
-          />
-          <SpeedDialAction
-            icon={<TwitterIcon />}
-            tooltipTitle="Share on Twitter"
-            onClick={() => shareResult('twitter')}
-          />
-          <SpeedDialAction
-            icon={<WhatsAppIcon />}
-            tooltipTitle="Share on WhatsApp"
-            onClick={() => shareResult('whatsapp')}
-          />
-          <SpeedDialAction
-            icon={<LinkedInIcon />}
-            tooltipTitle="Share on LinkedIn"
-            onClick={() => shareResult('linkedin')}
-          />
-        </SpeedDial>
-        
-        {/* Questions Review Section */}
-        <Paper 
-          elevation={3} 
-          sx={{ 
-            p: { xs: 2, md: 4 }, 
-            mb: 4, 
-            borderRadius: 3,
-            background: theme.palette.mode === 'dark'
-              ? `linear-gradient(135deg, ${summaryColorScheme.light} 0%, ${theme.palette.background.paper} 100%)`
-              : `linear-gradient(135deg, ${summaryColorScheme.light} 0%, #ffffff 100%)`,
-            boxShadow: `0 10px 40px ${summaryColorScheme.medium}`,
-            position: 'relative',
-            overflow: 'hidden'
-          }}
-        >
-          <Typography variant="h5" component="h2" gutterBottom sx={{ fontWeight: 'bold', color: summaryColorScheme.primary }}>
-            Test Summary
-          </Typography>
-          <Divider sx={{ mb: 3, borderColor: summaryColorScheme.light }} />
-          
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6} md={3}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.5 }}
-              >
-                <Box sx={{ 
-                  textAlign: 'center', 
-                  p: 3,
-                  borderRadius: 3,
-                  backgroundColor: summaryColorScheme.light,
-                  transition: 'all 0.3s',
-                  '&:hover': {
-                    transform: 'translateY(-5px)',
-                    boxShadow: `0 8px 25px ${summaryColorScheme.medium}`
-                  }
-                }}>
-                  <Avatar 
-                    sx={{ 
-                      mx: 'auto',
-                      mb: 2,
-                      background: summaryColorScheme.gradient,
-                      boxShadow: `0 4px 15px ${summaryColorScheme.medium}`
-                    }}
-                  >
-                    <StarIcon sx={{ 
-                      color: theme.palette.mode === 'dark' ? '#FFD700' : '#FFA500',
-                      filter: theme.palette.mode === 'dark' 
-                        ? 'drop-shadow(0 0 5px rgba(255, 215, 0, 0.7))'
-                        : 'drop-shadow(0 0 3px rgba(255, 165, 0, 0.5))',
-                      fontSize: '2rem'
-                    }} />
-                  </Avatar>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Total Questions
-                  </Typography>
-                  <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: summaryColorScheme.primary }}>
-                    <CountUp end={totalQuestions} duration={1.5} />
-                  </Typography>
-                </Box>
-              </motion.div>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.6 }}
-              >
-                <Box sx={{ 
-                  textAlign: 'center', 
-                  p: 3,
-                  borderRadius: 3,
-                  backgroundColor: summaryColorScheme.light,
-                  transition: 'all 0.3s',
-                  '&:hover': {
-                    transform: 'translateY(-5px)',
-                    boxShadow: `0 8px 25px ${summaryColorScheme.medium}`
-                  }
-                }}>
-                  <Avatar 
-                    sx={{ 
-                      mx: 'auto',
-                      mb: 2,
-                      background: summaryColorScheme.gradient,
-                      boxShadow: `0 4px 15px ${summaryColorScheme.medium}`
-                    }}
-                  >
-                    <CheckCircleIcon />
-                  </Avatar>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Correct Answers
-                  </Typography>
-                  <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: summaryColorScheme.primary }}>
-                    <CountUp end={correctAnswers} duration={1.5} />
-                  </Typography>
-                </Box>
-              </motion.div>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.7 }}
-              >
-                <Box sx={{ 
-                  textAlign: 'center', 
-                  p: 3,
-                  borderRadius: 3,
-                  backgroundColor: summaryColorScheme.light,
-                  transition: 'all 0.3s',
-                  '&:hover': {
-                    transform: 'translateY(-5px)',
-                    boxShadow: `0 8px 25px ${summaryColorScheme.medium}`
-                  }
-                }}>
-                  <Avatar 
-                    sx={{ 
-                      mx: 'auto',
-                      mb: 2,
-                      background: summaryColorScheme.gradient,
-                      boxShadow: `0 4px 15px ${summaryColorScheme.medium}`
-                    }}
-                  >
-                    <CancelIcon />
-                  </Avatar>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Incorrect Answers
-                  </Typography>
-                  <Typography variant="h5" component="div" sx={{ fontWeight: 'bold', color: summaryColorScheme.primary }}>
-                    <CountUp end={incorrectAnswers} duration={1.5} />
-                  </Typography>
-                </Box>
-              </motion.div>
-            </Grid>
-            
-            <Grid item xs={12} sm={6} md={3}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.8 }}
-              >
-                <Box sx={{ 
-                  textAlign: 'center', 
-                  p: 3,
-                  borderRadius: 3,
-                  backgroundColor: summaryColorScheme.light,
-                  transition: 'all 0.3s',
-                  '&:hover': {
-                    transform: 'translateY(-5px)',
-                    boxShadow: `0 8px 25px ${summaryColorScheme.medium}`
-                  }
-                }}>
-                  <Avatar 
-                    sx={{ 
-                      mx: 'auto',
-                      mb: 2,
-                      background: summaryColorScheme.gradient,
-                      boxShadow: `0 4px 15px ${summaryColorScheme.medium}`
-                    }}
-                  >
-                    <EmojiEventsIcon />
-                  </Avatar>
-                  <Typography variant="body2" color="text.secondary" gutterBottom>
-                    Result
-                  </Typography>
-                  <Chip 
-                    label={percentage >= 60 ? "PASSED" : "FAILED"}
-                    color={percentage >= 60 ? "success" : "error"}
-                    sx={{ 
-                      fontWeight: 'bold', 
-                      px: 2,
-                      py: 1,
-                      fontSize: '1rem',
-                      background: summaryColorScheme.gradient,
-                      color: 'white',
-                      boxShadow: `0 4px 15px ${summaryColorScheme.medium}`
-                    }}
-                  />
-                </Box>
-              </motion.div>
-            </Grid>
-          </Grid>
-        </Paper>
-        
-        <Typography variant="h5" component="h2" gutterBottom sx={{ mt: 4, mb: 3, fontWeight: 'bold', color: summaryColorScheme.primary }}>
-          Question Review
-        </Typography>
-        
-        {questions.map((question, index) => {
-          const userAnswer = answers[question._id] || null;
-          const isCorrect = isAnswerCorrect(question, userAnswer);
-          
-          return (
-            <motion.div
-              key={question._id}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: index * 0.1 }}
-            >
-              <Paper 
-                elevation={2} 
-                sx={{ 
-                  p: 3, 
-                  mb: 3, 
-                  borderRadius: 3,
-                  borderLeft: 6,
-                  borderLeftColor: isCorrect ? summaryColorScheme.primary : '#d63031',
-                  background: theme.palette.mode === 'dark'
-                    ? `linear-gradient(135deg, ${summaryColorScheme.light} 0%, ${theme.palette.background.paper} 100%)`
-                    : `linear-gradient(135deg, ${summaryColorScheme.light} 0%, #ffffff 100%)`,
-                  boxShadow: `0 8px 25px ${summaryColorScheme.medium}`,
-                  transition: 'all 0.3s',
-                  '&:hover': {
-                    transform: 'translateY(-5px)',
-                    boxShadow: `0 12px 35px ${summaryColorScheme.medium}`
-                  }
-                }}
-              >
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Typography variant="h6" component="h3" sx={{ fontWeight: 'bold', color: summaryColorScheme.primary }}>
-                    Question {index + 1}
-                  </Typography>
-                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                    {isCorrect ? (
-                      <Chip 
-                        icon={<CheckCircleIcon />} 
-                        label="Correct" 
-                        color="success" 
-                        variant="outlined" 
-                        sx={{ 
-                          fontWeight: 'bold',
-                          background: summaryColorScheme.gradient,
-                          color: 'white',
-                          boxShadow: `0 4px 15px ${summaryColorScheme.medium}`
-                        }}
-                      />
-                    ) : (
-                      <Chip 
-                        icon={<CancelIcon />} 
-                        label="Incorrect" 
-                        color="error" 
-                        variant="outlined" 
-                        sx={{ 
-                          fontWeight: 'bold',
-                          background: 'linear-gradient(45deg, #d63031, #e17055)',
-                          color: 'white',
-                          boxShadow: '0 4px 15px rgba(214, 48, 49, 0.2)'
-                        }}
-                      />
-                    )}
-                  </Box>
-                </Box>
-                
-                <Typography variant="body1" sx={{ mb: 2, fontWeight: 'medium' }}>
-                  {question.question}
-                </Typography>
-                
-                <Box sx={{ mb: 3 }}>
-                  {question.options && question.options.map(option => {
-                    const isOptionSelected = userAnswer === option.text || userAnswer === option._id;
-                    const isOptionCorrect = option.text === question.correctAnswer || option._id === question.correctAnswer;
-                    
-                    let bgColor = theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.05)' : 'grey.100';
-                    let borderColor = theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'grey.300';
-                    
-                    if (isOptionSelected && isOptionCorrect) {
-                      bgColor = theme.palette.mode === 'dark' 
-                        ? 'rgba(108, 92, 231, 0.2)' 
-                        : summaryColorScheme.light;
-                      borderColor = theme.palette.mode === 'dark' 
-                        ? 'rgba(162, 155, 254, 0.5)' 
-                        : summaryColorScheme.primary;
-                    } else if (isOptionSelected && !isOptionCorrect) {
-                      bgColor = theme.palette.mode === 'dark' 
-                        ? 'rgba(214, 48, 49, 0.2)' 
-                        : 'rgba(214, 48, 49, 0.1)';
-                      borderColor = theme.palette.mode === 'dark' 
-                        ? 'rgba(214, 48, 49, 0.5)' 
-                        : '#d63031';
-                    } else if (!isOptionSelected && isOptionCorrect) {
-                      bgColor = theme.palette.mode === 'dark' 
-                        ? 'rgba(108, 92, 231, 0.2)' 
-                        : summaryColorScheme.light;
-                      borderColor = theme.palette.mode === 'dark' 
-                        ? 'rgba(162, 155, 254, 0.5)' 
-                        : summaryColorScheme.primary;
-                    }
-                    
-                    return (
-                      <Box 
-                        key={option._id} 
-                        sx={{ 
-                          p: 2, 
-                          mb: 1, 
-                          borderRadius: 2,
-                          backgroundColor: bgColor,
-                          border: '1px solid',
-                          borderColor: borderColor,
-                          transition: 'all 0.3s',
-                          '&:hover': {
-                            transform: 'translateX(5px)',
-                            boxShadow: theme.palette.mode === 'dark' 
-                              ? '0 4px 15px rgba(0, 0, 0, 0.3)'
-                              : '0 4px 15px rgba(0, 0, 0, 0.1)'
-                          }
-                        }}
-                      >
-                        <Typography variant="body2">
-                          {option.text}
-                          {isOptionCorrect && !isOptionSelected && (
-                            <Typography component="span" sx={{ ml: 1, color: summaryColorScheme.primary, fontWeight: 'bold' }}>
-                              (Correct Answer)
-                            </Typography>
-                          )}
-                        </Typography>
-                      </Box>
-                    );
-                  })}
-                </Box>
-                
-                {!isCorrect && (
-                  <Box sx={{ mt: 2 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      <strong>Explanation:</strong> {question.explanation || "No explanation provided."}
-                    </Typography>
-                  </Box>
-                )}
-              </Paper>
-            </motion.div>
-          );
-        })}
-        
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-          <motion.div
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            variant="h3" 
+            gutterBottom 
+            align="center" 
+            sx={premiumStyles.gradientText}
           >
-            <Button 
-              variant="contained" 
-              color="primary" 
-              href="/dashboard"
-              size={isMobile ? "medium" : "large"}
-              sx={{ 
-                px: { xs: 3, md: 4 },
-                py: 1.5,
-                borderRadius: 3,
-                fontWeight: 'bold',
-                boxShadow: `0 8px 25px ${badgeColorScheme.medium}`,
-                background: badgeColorScheme.gradient,
-                '&:hover': {
-                  background: badgeColorScheme.gradient,
-                  boxShadow: `0 12px 35px ${badgeColorScheme.medium}`
-                }
-              }}
+            {testData.title}
+          </Typography>
+
+          {/* Animated Score Circle */}
+          <Box 
+                  sx={{
+              ...premiumStyles.scoreCircle,
+              '--score-color': getScoreColor(score),
+              '--score-percent': `${score}%`
+            }}
+          >
+            <Typography variant="h2" sx={premiumStyles.gradientText}>
+                    <CountUp 
+                end={score} 
+                      suffix="%" 
+                duration={2.5} 
+                decimals={1}
+                    />
+                  </Typography>
+                </Box>
+
+          {/* Achievement Badge */}
+          <Box sx={{ textAlign: 'center', my: 4 }}>
+              <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: "spring", stiffness: 260, damping: 20 }}
             >
-              Back to Dashboard
+              <Chip
+                icon={testAttempt.isPassed ? <EmojiEventsIcon /> : <StarIcon />}
+                label={testAttempt.isPassed ? 'Achievement Unlocked! 🏆' : 'Keep Going! 💪'}
+                    sx={{ 
+                  p: 3,
+                  fontSize: '1.2rem',
+                  background: testAttempt.isPassed 
+                    ? 'linear-gradient(45deg, #00b894, #00cec9)'
+                    : 'linear-gradient(45deg, #fdcb6e, #e17055)',
+                  color: 'white',
+                  '& .MuiChip-icon': {
+                    color: 'white'
+                  }
+                }}
+              />
+              </motion.div>
+                </Box>
+
+          {/* Stats Grid with Animation */}
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            {[
+              {
+                title: 'Correct Answers',
+                value: `${correctAnswers}/${totalQuestions}`,
+                icon: <CheckCircleIcon />,
+                color: '#00b894'
+              },
+              {
+                title: 'Time Taken',
+                value: `${Math.floor(timeTaken / 60)}m ${timeTaken % 60}s`,
+                icon: <TimerIcon />,
+                color: '#0984e3'
+              },
+              {
+                title: 'Avg. Time/Question',
+                value: `${averageTimePerQuestion}s`,
+                icon: <SpeedIcon />,
+                color: '#6c5ce7'
+              },
+              {
+                title: 'Completion Speed',
+                value: completionSpeed,
+                icon: <TrendingUpIcon />,
+                color: '#e84393'
+              }
+            ].map((stat, index) => (
+              <Grid item xs={12} sm={6} md={3} key={index}>
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                >
+                  <Card 
+                    sx={{ 
+                      ...premiumStyles.glassCard,
+                      ...premiumStyles.statCard
+                    }}
+                  >
+                    <CardContent>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                        <Avatar sx={{ bgcolor: stat.color }}>
+                          {stat.icon}
+                  </Avatar>
+                        <Typography variant="h6" sx={{ ml: 1 }}>
+                          {stat.title}
+                  </Typography>
+                </Box>
+                      <Typography variant="h4" sx={{ color: stat.color }}>
+                        {stat.value}
+                      </Typography>
+                    </CardContent>
+                  </Card>
+              </motion.div>
+            </Grid>
+            ))}
+          </Grid>
+
+          {/* Action Buttons with Hover Effects */}
+          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'center', gap: 3 }}>
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+              <Button 
+                variant="contained" 
+                onClick={() => navigate(`/tests/${testId}/review`)}
+                startIcon={<MenuBookIcon />}
+                sx={{ 
+                  background: 'linear-gradient(45deg, #00b894, #00cec9)',
+                  px: 4,
+                  py: 1.5,
+                  borderRadius: '12px',
+                  '&:hover': {
+                    background: 'linear-gradient(45deg, #00cec9, #00b894)'
+                  }
+                }}
+              >
+                Review Test
+              </Button>
+            </motion.div>
+            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <Button 
+                variant="outlined" 
+                onClick={() => navigate('/tests')}
+                startIcon={<TimelineIcon />}
+              sx={{ 
+                  px: 4,
+                py: 1.5,
+                  borderRadius: '12px',
+                  borderWidth: '2px'
+                }}
+              >
+                Back to Tests
             </Button>
           </motion.div>
         </Box>
+
+          {/* Share Results SpeedDial */}
+          <SpeedDial
+            ariaLabel="Share Results"
+            sx={{ position: 'fixed', bottom: 16, right: 16 }}
+            icon={<ShareIcon />}
+          >
+            {[
+              { icon: <FacebookIcon />, name: 'Facebook', action: () => shareResult('facebook') },
+              { icon: <TwitterIcon />, name: 'Twitter', action: () => shareResult('twitter') },
+              { icon: <WhatsAppIcon />, name: 'WhatsApp', action: () => shareResult('whatsapp') },
+              { icon: <LinkedInIcon />, name: 'LinkedIn', action: () => shareResult('linkedin') }
+            ].map((action) => (
+              <SpeedDialAction
+                key={action.name}
+                icon={action.icon}
+                tooltipTitle={action.name}
+                onClick={action.action}
+              />
+            ))}
+          </SpeedDial>
+        </Paper>
       </motion.div>
     </Container>
   );

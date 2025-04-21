@@ -10,6 +10,7 @@ import QuestionDisplay from '../../components/test/QuestionDisplay';
 import SubmitConfirmation from '../../components/test/SubmitConfirmation';
 import TestProgressBar from '../../components/test/TestProgressBar';
 import { toast } from 'react-toastify';
+import { LoadingButton } from '@mui/lab';
 import { 
   Box, 
   Container, 
@@ -23,13 +24,24 @@ import {
   Drawer,
   AppBar,
   Toolbar,
-  Fab
+  Fab,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  FormControlLabel,
+  Radio
 } from '@mui/material';
 import {
   Menu as MenuIcon,
   Close as CloseIcon,
   NavigateBefore as NavigateBeforeIcon,
-  NavigateNext as NavigateNextIcon
+  NavigateNext as NavigateNextIcon,
+  Bookmark as BookmarkIcon,
+  ArrowBack as ArrowBackIcon,
+  ArrowForward as ArrowForwardIcon,
+  Send as SendIcon
 } from '@mui/icons-material';
 
 const TestAttempt = () => {
@@ -73,7 +85,8 @@ const TestAttempt = () => {
     currentTestId,
     setAnswers,
     isSubmitting,
-    setShowSubmitModal
+    setShowSubmitModal,
+    setIsSubmitting
   } = useTestAttempt();
 
   // Initialize test data - Load test ID on mount
@@ -367,86 +380,55 @@ const TestAttempt = () => {
     }
   }
   
-  // Handle submit button click
-  const handleConfirmSubmit = () => {
-    confirmSubmit();
+  // Get current question number (1-based index)
+  const getCurrentQuestionNumber = () => {
+    if (!test?.sections || !test?.questions) return 1;
+    
+    let questionNumber = 1;
+    const currentSectionTitle = test.sections[currentSection]?.title;
+    
+    // Count questions up to current section
+    for (let i = 0; i < currentSection; i++) {
+      const sectionTitle = test.sections[i].title;
+      questionNumber += test.questions.filter(q => q.sectionTitle === sectionTitle).length;
+    }
+    
+    // Add current question index
+    return questionNumber + currentQuestion;
   };
-  
-  // Handle actual submission
+
   const handleConfirmation = async () => {
     try {
-      // Call handleSubmit from context and get the result
+      if (isSubmitting) return;
+      
+      // Get final test stats before submission
+      const finalStats = getTestStats();
+      console.log('Submitting test with stats:', finalStats);
+      
+      // Call the submit function from context
       const result = await handleSubmit();
       
-      if (result) {
-        // Check if this is the special "already submitted" case
-        if (result.status === 'already_submitted') {
-          // Show appropriate message
-          toast.success('Test was already submitted. Viewing results now.');
-          
-          // Navigate to results page
-          setTimeout(() => {
-            navigate(`/test-results/${testId}/${user.firebaseId || user.uid}`);
-          }, 1000);
-          
-          return true;
-        }
+      if (result && result.attempt) {
+        // Clear any cached data
+        localStorage.removeItem(`test_${testId}_answers`);
+        localStorage.removeItem(`test_${testId}_time`);
         
-        // Regular successful submission
-        toast.success('Test submitted successfully!');
-        
-        // Navigate to results page
-        setTimeout(() => {
-          navigate(`/test-results/${testId}/${user.firebaseId || user.uid}`);
-        }, 1000);
-        
-        return true;
-      } else {
-        // Show a helpful error message with diagnostic info
-        toast.error(
-          'Error submitting test. Your answers have been saved. Please try again or contact support.',
-          { autoClose: 7000 }
-        );
-        
-        // Log more diagnostic information
-        console.error(`Test submission failed for test ID: ${testId}. Status: Error`);
-        
-        // Close the submission modal
+        // Close the modal
         setShowSubmitModal(false);
         
-        return false;
+        // Navigate to results page
+        navigate(`/tests/${testId}/results/${result.attempt.id}`);
       }
     } catch (error) {
-      // Extract the specific error details
-      const errorCode = error.response?.status || 'unknown';
-      const errorMessage = error.response?.data?.message || error.message || 'Unknown error';
-      
-      // Log detailed error information for debugging
-      console.error('Error during test submit confirmation:', {
-        testId,
-        errorCode,
-        errorMessage,
-        error
-      });
-      
-      // Show a user-friendly error with some diagnostic info
-      toast.error(
-        `Test submission failed (Error ${errorCode}). Your progress has been saved. You can try again or contact support.`,
-        { autoClose: 7000 }
-      );
-      
-      // Close the submission modal
-      setShowSubmitModal(false);
-      
-      return false;
+      console.error('Error submitting test:', error);
+      toast.error(error.message || 'Failed to submit test. Please try again.');
     }
   };
-  
-  // Handle cancellation of submission
-  const handleCancelSubmit = () => {
-    setShowSubmitModal(false);
-  };
-  
+
+  const question = getCurrentQuestion();
+  const questionNumber = getCurrentQuestionNumber();
+  const stats = getTestStats();
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
       {/* Header with timer and controls */}
@@ -514,66 +496,84 @@ const TestAttempt = () => {
               display: 'flex',
               flexDirection: 'column'
             }}>
-              {currentQuestionData && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
+              {/* Question Header */}
+              <Box sx={{ mb: 2 }}>
+                <Typography variant="h6" component="div">
+                  Question {questionNumber} of {test?.questions?.length || 0}
+                </Typography>
+              </Box>
+
+              {/* Question Content */}
+              <Paper sx={{ p: 3, mb: 3 }}>
+                {question ? (
+                  <>
+                    <Typography variant="body1" gutterBottom>
+                      {question.text}
+                    </Typography>
+                    
+                    {/* Answer Options */}
+                    <Box sx={{ mt: 2 }}>
+                      {question.options?.map((option, index) => {
+                        // Extract option text based on whether it's an object or string
+                        const optionText = typeof option === 'object' ? option.text : option;
+                        const optionValue = typeof option === 'object' ? option._id : option;
+                        
+                        return (
+                          <FormControlLabel
+                            key={index}
+                            control={
+                              <Radio
+                                checked={answers[question._id] === optionValue}
+                                onChange={(e) => handleAnswerChange(question._id, optionValue)}
+                              />
+                            }
+                            label={optionText}
+                            sx={{ display: 'block', mb: 1 }}
+                          />
+                        );
+                      })}
+                    </Box>
+
+                    {/* Mark for Review Button */}
+                    <Button
+                      variant="outlined"
+                      color="warning"
+                      onClick={() => markForReview(question._id)}
+                      startIcon={<BookmarkIcon />}
+                      sx={{ mt: 2 }}
+                    >
+                      Mark Question {questionNumber} for Review
+                    </Button>
+                  </>
+                ) : (
+                  <Typography>Question not available</Typography>
+                )}
+              </Paper>
+
+              {/* Navigation Buttons */}
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 2 }}>
+                <Button
+                  variant="contained"
+                  onClick={prevQuestion}
+                  disabled={currentSection === 0 && currentQuestion === 0}
+                  startIcon={<ArrowBackIcon />}
                 >
-                  <QuestionDisplay 
-                    question={currentQuestionData}
-                    answer={answers[currentQuestionData._id]}
-                    onAnswerChange={(answer) => handleAnswerChange(currentQuestionData._id, answer)}
-                    onMarkForReview={() => markForReview(currentQuestionData._id)}
-                    status={questionStatus[currentQuestionData._id]}
-                    onNext={nextQuestion || (() => {})}
-                    onPrev={prevQuestion || (() => {})}
-                  />
-                </motion.div>
-              )}
-              
-              {/* Desktop navigation and submit */}
-              {!isMobile && (
-                <Box sx={{ 
-                  mt: 3, 
-                  display: 'flex', 
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  borderTop: '1px solid',
-                  borderColor: 'divider',
-                  pt: 2
-                }}>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
-                    <Button
-                      variant="outlined"
-                      onClick={prevQuestion}
-                      startIcon={<NavigateBeforeIcon />}
-                      disabled={!prevQuestion}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      onClick={nextQuestion}
-                      endIcon={<NavigateNextIcon />}
-                      disabled={!nextQuestion}
-                    >
-                      Next
-                    </Button>
-                  </Box>
-                  
-                  <Button
-                    variant="contained"
-                    color="success"
-                    size="large"
-                    onClick={confirmSubmit}
-                    sx={{ px: 4 }}
-                  >
-                    Submit Test
-                  </Button>
-                </Box>
-              )}
+                  Previous
+                </Button>
+
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={nextQuestion}
+                  disabled={currentSection === test?.sections?.length - 1 && 
+                           currentQuestion === (test?.questions?.filter(q => 
+                             q.sectionTitle === test?.sections[currentSection]?.title
+                           ).length || 0) - 1}
+                  endIcon={<ArrowForwardIcon />}
+                >
+                  Next
+                </Button>
+              </Box>
             </Box>
             
             {/* Question navigation grid - hide by default on mobile */}
@@ -683,15 +683,49 @@ const TestAttempt = () => {
         </Box>
       )}
       
-      {/* Submit confirmation modal */}
-      {showSubmitModal && (
-        <SubmitConfirmation
-          stats={getTestStats()}
-          onConfirm={handleConfirmation}
-          onCancel={handleCancelSubmit}
-          isSubmitting={isSubmitting}
-        />
-      )}
+      {/* Submit Modal */}
+      <Dialog
+        open={showSubmitModal}
+        onClose={() => setShowSubmitModal(false)}
+        aria-labelledby="submit-dialog-title"
+      >
+        <DialogTitle id="submit-dialog-title">
+          Confirm Test Submission
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText component="div">
+            Are you sure you want to submit your test? Please review your progress:
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="body1">Total Questions: {stats.total}</Typography>
+              <Typography variant="body1">Answered: {stats.answered}</Typography>
+              <Typography variant="body1">Not Visited: {stats.notVisited}</Typography>
+              <Typography variant="body1">Marked for Review: {stats.markedForReview}</Typography>
+            </Box>
+            <Typography color="error" sx={{ mt: 2 }}>
+              Note: Once submitted, you cannot make any changes to your answers.
+            </Typography>
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShowSubmitModal(false)} 
+            color="primary"
+            disabled={isSubmitting}
+          >
+            Cancel
+          </Button>
+          <LoadingButton
+            onClick={handleConfirmation}
+            color="primary"
+            loading={isSubmitting}
+            loadingPosition="start"
+            startIcon={<SendIcon />}
+            variant="contained"
+          >
+            {isSubmitting ? 'Submitting...' : 'Submit Test'}
+          </LoadingButton>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

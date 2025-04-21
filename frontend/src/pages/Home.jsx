@@ -144,10 +144,10 @@ const Home = () => {
                       fontSize: '1.1rem',
                       borderRadius: 2,
                       textTransform: 'none',
-                      boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+                      boxShadow: '0 4px 10px rgba(0,118,255,0.15)',
                       '&:hover': {
                         transform: 'translateY(-2px)',
-                        boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
+                        boxShadow: '0 6px 15px rgba(0,118,255,0.25)',
                       },
                       transition: 'all 0.3s ease'
                     }}
@@ -391,10 +391,10 @@ const Home = () => {
                       fontSize: '1.1rem',
                       borderRadius: 2,
                       textTransform: 'none',
-                      boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+                      boxShadow: '0 4px 10px rgba(0,118,255,0.15)',
                       '&:hover': {
                         transform: 'translateY(-2px)',
-                        boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
+                        boxShadow: '0 6px 15px rgba(0,118,255,0.25)',
                       },
                       transition: 'all 0.3s ease'
                     }}

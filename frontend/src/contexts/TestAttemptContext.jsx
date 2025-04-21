@@ -73,6 +73,10 @@ export const TestAttemptProvider = ({ children }) => {
   const [currentTestId, setCurrentTestId] = useState(null);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [hasBeenSubmitted, setHasBeenSubmitted] = useState(false);
+  const [submitAttempts, setSubmitAttempts] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
 
   // Question status constants
   const STATUS = {
@@ -225,181 +229,172 @@ export const TestAttemptProvider = ({ children }) => {
 
   // Load saved progress
   const loadSavedProgress = async (testId, testData) => {
-    if (!user || progressLoaded) return false; // Return false if no progress loaded
-    
+    if (!user || progressLoaded) return false;
+
+    // Add loading lock to prevent race conditions
+    if (window._loadingProgress) {
+      console.warn('Progress load already in progress, skipping');
+      return false;
+    }
+    window._loadingProgress = true;
+
     try {
-      // Get the user ID to use in the API call
       const userId = user.firebaseId || user.uid || (typeof user === 'string' ? user : null);
       if (!userId) {
         console.error('No valid user ID found for API call');
         return false;
       }
       
-      // Use passed testData or the current test state
       const currentTest = testData || test;
-      
-      // Only continue if we have test data with questions
-      if (!currentTest || !currentTest.questions || !currentTest.questions.length) {
+      if (!currentTest?.questions?.length) {
         console.warn('Cannot load progress: test data is not available');
         return false;
       }
-      
-      // Get list of valid question IDs
-      const validQuestionIds = currentTest.questions.map(q => q._id).filter(Boolean);
-      if (!validQuestionIds.length) {
+
+      const validQuestionIds = new Set(currentTest.questions.map(q => q._id).filter(Boolean));
+      if (!validQuestionIds.size) {
         console.warn('No valid question IDs found in test data');
         return false;
       }
-      
-      console.log(`Attempting to load progress for test ${testId} with ${validQuestionIds.length} valid questions`);
-      
-      // Create a custom axios instance just for progress loading to silently handle 404s
+
+      console.log(`Loading progress for test ${testId} with ${validQuestionIds.size} valid questions`);
+
+      // Create axios instance with retry logic
       const silentAxios = axios.create({
         baseURL: api.defaults.baseURL,
-        headers: api.defaults.headers
+        headers: api.defaults.headers,
+        timeout: 10000 // 10 second timeout
       });
-      
-      // Clone the auth interceptor from the main api instance
+
+      // Add retry interceptor
+      silentAxios.interceptors.response.use(null, async (error) => {
+        if (error.response?.status === 404) {
+          return { status: 404, data: null };
+        }
+        
+        const config = error.config;
+        config.retryCount = config.retryCount || 0;
+        
+        if (config.retryCount < 2 && error.response?.status >= 500) {
+          config.retryCount++;
+          await new Promise(resolve => setTimeout(resolve, 1000 * config.retryCount));
+          return silentAxios(config);
+        }
+        return Promise.reject(error);
+      });
+
+      // Add auth interceptor
       silentAxios.interceptors.request.use(async (config) => {
-        // Copy auth headers from the main api instance if possible
         try {
           const user = auth.currentUser;
           if (user) {
-            const token = await user.getIdToken();
+            const token = await user.getIdToken(true); // Force refresh token
             config.headers.Authorization = `Bearer ${token}`;
           }
         } catch (e) {
-          // Silently handle auth errors - will fall back to no auth
+          console.warn('Auth error in progress load:', e);
         }
         return config;
       });
       
-      // Add a response interceptor to silently handle 404s
-      silentAxios.interceptors.response.use(
-        (response) => response,
-        (error) => {
-          // If it's a 404, resolve with a custom response instead of rejecting
-          if (error.response && error.response.status === 404) {
-            return Promise.resolve({ 
-              status: 404, 
-              data: null,
-              config: error.config,
-              headers: error.response.headers,
-              statusText: 'Not Found'
-            });
-          }
-          
-          // Otherwise, reject normally
-          return Promise.reject(error);
-        }
-      );
-      
-      // Use the silent axios instance for the call
       const response = await silentAxios.get(`/api/tests/${testId}/progress/${userId}`);
         
-      // If the status is 404, consider it "no progress" (not an error)
       if (response.status === 404) {
-        // Don't log anything to keep the console clean
         console.log(`No saved progress found for test ${testId}`);
         return false;
       }
         
-      // Track if timer was restored
+      if (!response.data) {
+        console.warn('Invalid progress data received');
+        return false;
+      }
+
       let timerRestored = false;
         
-      // Otherwise, continue with setting the answers and timer state
-      if (response.data) {
-        console.log(`Found saved progress for test ${testId}`, response.data);
+      // Validate and restore timer
+      if (typeof response.data.timeLeft === 'number' && response.data.timeLeft > 0) {
+        console.log(`Restoring timer: ${response.data.timeLeft}s`);
+        const maxAllowedTime = currentTest.duration ? currentTest.duration * 60 : Infinity;
+        const newTime = Math.min(response.data.timeLeft, maxAllowedTime);
         
-        // Restore the timer if it exists in the saved progress
-        if (response.data.timeLeft !== undefined && response.data.timeLeft > 0) {
-          console.log(`Restoring timer from saved progress: ${response.data.timeLeft} seconds`);
-          
-          // Make sure we don't give more time than the total test duration
-          if (currentTest && currentTest.duration) {
-            const maxAllowedTime = currentTest.duration * 60;
-            // If saved time is greater than max allowed time, use max allowed time
-            if (response.data.timeLeft > maxAllowedTime) {
-              console.warn(`Saved time (${response.data.timeLeft}s) exceeds test duration (${maxAllowedTime}s). Using maximum allowed time.`);
-              setTimeLeft(maxAllowedTime);
-            } else {
-              setTimeLeft(response.data.timeLeft);
-            }
-          } else {
-            // If we can't validate against test duration, just set the saved time
-            setTimeLeft(response.data.timeLeft);
-          }
-          timerRestored = true;
+        if (newTime !== response.data.timeLeft) {
+          console.warn(`Adjusted time from ${response.data.timeLeft}s to ${newTime}s`);
         }
         
-        // Restore saved answers
-        if (response.data.answers) {
-          // Filter out invalid answers and parse any serialized objects
-          const validAnswers = {};
-          let savedAnswerCount = 0;
-          let invalidAnswerCount = 0;
-          
-          Object.entries(response.data.answers).forEach(([questionId, answer]) => {
-            // Skip any internal properties, empty answers, or answers for questions not in this test
-            if (!questionId.startsWith('$') && !questionId.startsWith('_') && 
-                validQuestionIds.includes(questionId) &&
-                answer !== undefined && answer !== null && answer !== '') {
-              
-              savedAnswerCount++;
-              
-              // Try to parse any stringified objects
-              if (typeof answer === 'string' && 
-                  (answer.startsWith('{') || answer.startsWith('['))) {
-                try {
-                  validAnswers[questionId] = JSON.parse(answer);
-                } catch (e) {
-                  // If parsing fails, use the original string
-                  validAnswers[questionId] = answer;
-                }
-              } else {
-                validAnswers[questionId] = answer;
-              }
-            } else {
-              invalidAnswerCount++;
-            }
-          });
-          
-          // Only update with valid answers
-          if (Object.keys(validAnswers).length > 0) {
-            console.log(`Loading ${Object.keys(validAnswers).length} saved answers (ignored ${invalidAnswerCount} invalid answers)`);
-            setAnswers(validAnswers);
-            
-            // Update question status for answered questions
-            const updatedStatus = { ...questionStatus };
-            Object.keys(validAnswers).forEach(questionId => {
-              updatedStatus[questionId] = STATUS.ANSWERED;
-            });
-            setQuestionStatus(updatedStatus);
-          } else {
-            console.warn('No valid answers found in saved progress');
-          }
+        setTimeLeft(newTime);
+        timerRestored = true;
+      }
+
+      // Initialize question status for all questions
+      const initialStatus = {};
+      currentTest.questions.forEach(question => {
+        if (question && question._id) {
+          initialStatus[question._id] = STATUS.NOT_VISITED;
         }
+      });
+      
+      // Validate and restore answers
+      if (response.data.answers && typeof response.data.answers === 'object') {
+        const validAnswers = {};
+        let invalidCount = 0;
         
-        // Log when the progress was last saved
-        if (response.data.saveTimestamp) {
-          const savedTime = new Date(response.data.saveTimestamp);
-          const now = new Date();
-          const timeDiffMinutes = Math.floor((now - savedTime) / (1000 * 60));
-          console.log(`Test progress was last saved ${timeDiffMinutes} minutes ago`);
+        Object.entries(response.data.answers).forEach(([qId, answer]) => {
+          if (validQuestionIds.has(qId) && answer !== null && answer !== undefined) {
+            validAnswers[qId] = answer;
+            // Update status for answered questions
+            initialStatus[qId] = STATUS.ANSWERED;
+          } else {
+            invalidCount++;
+          }
+        });
+
+        if (invalidCount > 0) {
+          console.warn(`Filtered out ${invalidCount} invalid answers`);
+        }
+
+        // Set answers first
+        if (Object.keys(validAnswers).length > 0) {
+          setAnswers(validAnswers);
+          console.log(`Restored ${Object.keys(validAnswers).length} valid answers`);
         }
       }
+
+      // Restore marked for review status if available
+      if (response.data.markedForReview && Array.isArray(response.data.markedForReview)) {
+        response.data.markedForReview.forEach(qId => {
+          if (validQuestionIds.has(qId)) {
+            initialStatus[qId] = STATUS.MARKED_FOR_REVIEW;
+          }
+        });
+      }
+
+      // Set visited status for questions that were viewed but not answered
+      if (response.data.visited && Array.isArray(response.data.visited)) {
+        response.data.visited.forEach(qId => {
+          if (validQuestionIds.has(qId) && initialStatus[qId] === STATUS.NOT_VISITED) {
+            initialStatus[qId] = STATUS.VISITED;
+          }
+        });
+      }
+
+      // Set the question status after all updates
+      setQuestionStatus(initialStatus);
+      console.log('Question status restored:', initialStatus);
       
       setProgressLoaded(true);
-      return timerRestored; // Return whether timer was restored
+      return timerRestored;
     } catch (error) {
-      // This should only happen for network errors or other serious issues
-      // Don't log 404 errors
-      if (!(error.response && error.response.status === 404)) {
-        console.error('Critical error loading saved progress:', error);
+      console.error('Error loading progress:', error);
+      if (error.response) {
+        console.error('Response error:', {
+          status: error.response.status,
+          data: error.response.data,
+          headers: error.response.headers
+        });
       }
-      // Non-critical error, can continue without saved progress
-      setProgressLoaded(true);
-      return false; // Return false as timer was not restored
+      return false;
+    } finally {
+      window._loadingProgress = false;
     }
   };
 
@@ -416,118 +411,56 @@ export const TestAttemptProvider = ({ children }) => {
       return false;
     }
     
-    // Only save if we have actual answers to save and test data is available
-    if (Object.keys(answers).length === 0 || !test || !test.questions) {
-      console.log('No answers to save yet or test data not available');
-      return false;
-    }
-    
     try {
-      // Get valid question IDs from the test to filter answers
+      // Get valid question IDs from the test
       const validQuestionIds = test.questions.map(q => q._id).filter(Boolean);
       
       // Filter answers to only include valid questions from this test
       const validAnswers = {};
       let validAnswerCount = 0;
       
+      // Collect marked for review questions
+      const markedForReview = [];
+      // Collect visited questions
+      const visited = [];
+      
+      Object.entries(questionStatus).forEach(([qId, status]) => {
+        if (validQuestionIds.includes(qId)) {
+          if (status === STATUS.MARKED_FOR_REVIEW) {
+            markedForReview.push(qId);
+          } else if (status === STATUS.VISITED) {
+            visited.push(qId);
+          }
+        }
+      });
+      
       for (const [qId, answer] of Object.entries(answers)) {
-        // Only include answers for questions that exist in this test
         if (!validQuestionIds.includes(qId)) continue;
         
-        // Include non-empty answers of any type
         if (answer !== undefined && answer !== null && answer !== '') {
-          // Convert all answers to string format for consistent storage
-          if (typeof answer === 'object') {
-            validAnswers[qId] = JSON.stringify(answer);
-          } else {
-            validAnswers[qId] = String(answer);
-          }
+          validAnswers[qId] = answer;
           validAnswerCount++;
         }
       }
       
-      // Log the actual number of valid answers
-      console.log(`Saving progress with ${validAnswerCount} valid answers out of ${Object.keys(answers).length} total answers`);
+      console.log(`Saving progress with ${validAnswerCount} answers, ${markedForReview.length} marked, ${visited.length} visited`);
       
-      // If no valid answers, skip the save
-      if (validAnswerCount === 0) {
-        console.log('No valid answers to save');
-        return false;
-      }
-      
-      // Create an efficient payload for saving
-      // Limit to 100 answers per save to prevent document size issues
-      const cleanAnswers = {};
-      let answerCount = 0;
-      
-      for (const [qId, answer] of Object.entries(validAnswers)) {
-        cleanAnswers[qId] = answer;
-        answerCount++;
-        
-        if (answerCount >= 100) {
-          break;
-        }
-      }
-      
-      // Also save the current time left
+      // Create payload with all progress information
       const payload = {
-        answers: cleanAnswers,
-        timeLeft: timeLeft
+        answers: validAnswers,
+        timeLeft,
+        markedForReview,
+        visited
       };
       
-      // Save current progress
-      const response = await api.post(
-        `/api/tests/${id}/save-progress`,
-        payload
-      );
+      const response = await api.post(`/api/tests/${id}/save-progress`, payload);
       
       if (response.data) {
-        console.log(`Progress saved successfully. Server response:`, response.data);
-        
-        // If we have more answers to save, recurse with the remaining answers
-        const remainingCount = validAnswerCount - answerCount;
-        if (remainingCount > 0) {
-          // Remove saved answers
-          const remainingAnswers = {...validAnswers};
-          Object.keys(cleanAnswers).forEach(qId => delete remainingAnswers[qId]);
-          
-          // Update answers with remaining only, keeping invalid answers to avoid losing data
-          const newAnswers = {...answers};
-          Object.keys(answers).forEach(qId => {
-            if (validQuestionIds.includes(qId) && !Object.keys(remainingAnswers).includes(qId)) {
-              delete newAnswers[qId];
-            }
-          });
-          setAnswers(newAnswers);
-          
-          // Wait a short time to avoid overwhelming the server
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          // Recursively save remaining answers
-          return saveAnswers(id);
-        }
-        
-        // Clean up any invalid answers from the state
-        if (Object.keys(answers).length > validAnswerCount) {
-          console.log(`Cleaning up ${Object.keys(answers).length - validAnswerCount} invalid answers from state`);
-          const cleanedAnswers = {};
-          for (const [qId, answer] of Object.entries(answers)) {
-            if (validQuestionIds.includes(qId)) {
-              cleanedAnswers[qId] = answer;
-            }
-          }
-          setAnswers(cleanedAnswers);
-        }
-        
-        // All answers saved successfully
-        // Mark progress as saved
-        setProgressLoaded(true);
+        console.log('Progress saved successfully');
         return true;
       }
     } catch (error) {
       console.error('Error saving progress:', error);
-      
-      // Don't show toast for every autosave error to avoid spamming the user
       return false;
     }
   };
@@ -635,160 +568,126 @@ export const TestAttemptProvider = ({ children }) => {
     setCurrentQuestion(questionIndex);
   };
 
-  // Submit test
-  const submitTest = async (testId = null) => {
-    const id = testId || currentTestId;
-    if (isSubmitting || !user || !test || !id) return;
-    
+  // Submit the test
+  const submitTest = async () => {
+    if (isSubmitting || hasBeenSubmitted) {
+      console.log('Test submission already in progress or previously completed');
+      toast.warning('Submission already in progress or test already submitted');
+      return;
+    }
+
     setIsSubmitting(true);
+    setSubmitError(null);
+    
     try {
-      const userId = user.firebaseId || user.uid;
-      if (!userId) {
-        throw new Error('No valid user ID found for test submission');
+      // Save final answers before submission
+      await saveAnswers();
+      
+      console.log(`Submitting test ${currentTestId} with ${Object.keys(answers).length} answers`);
+      
+      // Get current user token
+      const user = auth.currentUser;
+      if (!user) {
+        setSubmitError('Authentication required to submit test');
+        toast.error('Please login again to submit the test');
+        setIsSubmitting(false);
+        return;
       }
 
-      // Save progress one last time before submitting
-      try {
-        await saveAnswers(id);
-      } catch (saveError) {
-        console.warn('Error saving final progress before submission, continuing anyway:', saveError);
-      }
-
-      // Format answers based on question types using a clean approach
-      const safeAnswers = {};
-      
-      test.questions.forEach(question => {
-        // Skip if question has no ID or ID is not valid
-        if (!question._id || 
-            typeof question._id !== 'string' || 
-            question._id.includes('$') || 
-            question._id.includes('.') || 
-            question._id.startsWith('_')) {
-          return;
-        }
-        
-        const userAnswer = answers[question._id];
-        if (userAnswer === undefined || userAnswer === null || userAnswer === '') return;
-        
-        // Handle different question types accordingly
-        try {
-          if (question.type === 'integer') {
-            // Convert to string to ensure MongoDB compatibility
-            safeAnswers[question._id] = String(parseInt(userAnswer));
-          } else if (question.type === 'trueFalse') {
-            safeAnswers[question._id] = String(userAnswer).toLowerCase();
-          } else if (question.type === 'multiple_select') {
-            // Multiple select answers are comma-separated strings of option IDs
-            if (Array.isArray(userAnswer)) {
-              safeAnswers[question._id] = userAnswer.join(',');
-            } else {
-              safeAnswers[question._id] = String(userAnswer);
-            }
-          } else if (question.type === 'mcq' || question.type === 'multiple_choice') {
-            // MCQ answers could be option IDs if options are objects
-            safeAnswers[question._id] = String(userAnswer);
-          } else if (question.type === 'matching' && typeof userAnswer === 'object') {
-            // Clean the matching answers to remove any internal properties
-            try {
-              // First create a clean array without any internal properties
-              const cleanArray = Array.isArray(userAnswer) ? 
-                userAnswer.map(item => {
-                  if (typeof item !== 'object' || item === null) return item;
-                  
-                  // Only include safe properties
-                  const cleanItem = {};
-                  Object.keys(item).forEach(key => {
-                    if (!key.startsWith('$') && !key.startsWith('_')) {
-                      cleanItem[key] = item[key];
-                    }
-                  });
-                  return cleanItem;
-                }) : [];
-          
-              safeAnswers[question._id] = JSON.stringify(cleanArray);
-            } catch (e) {
-              console.warn(`Could not stringify matching answer for ${question._id}:`, e);
-            }
-          } else {
-            // For all other types, convert to string
-            safeAnswers[question._id] = String(userAnswer);
-          }
-        } catch (formatError) {
-          console.error(`Error formatting answer for question ${question._id}:`, formatError);
-          // Skip this answer rather than failing the entire submission
-        }
-      });
-      
-      console.log(`Submitting test with ${Object.keys(safeAnswers).length} clean answers`);
-      
-      // Check if we have any answers to submit
-      if (Object.keys(safeAnswers).length === 0) {
-        console.warn('No valid answers to submit - this will result in a zero score');
+      const token = await user.getIdToken(true);
+      if (!token) {
+        setSubmitError('Authentication token not found');
+        toast.error('Please login again to submit the test');
+        setIsSubmitting(false);
+        return;
       }
       
-      // Create the payload for submission
+      // Get the attempt ID from localStorage if available
+      const attemptId = localStorage.getItem(`test_${currentTestId}_attempt_id`);
+      
+      // Create submission payload
       const payload = {
-        userId: userId,
-        answers: safeAnswers,
-        timeTaken: Math.max(test.duration * 60 - timeLeft, 0)
+        answers,
+        attemptId,
+        timeLeft,
+        testId: currentTestId,
+        userId: user.uid
       };
+
+      // Make the submission request using axios instead of fetch
+      const response = await api.post(`/api/tests/${currentTestId}/submit`, payload);
       
-      // Log the request payload for debugging
-      console.log('Test submission payload:', {
-        testId: id,
-        userId,
-        answersCount: Object.keys(safeAnswers).length,
-        timeTaken: payload.timeTaken
-      });
+      // Handle successful submission
+      console.log('Submission response:', response.data);
+      setHasBeenSubmitted(true);
+      toast.success('Test submitted successfully!');
       
-      try {
-        const response = await api.post(
-          `/api/tests/${id}/attempt`,
-          payload,
-          {
-            retry: 3,
-            retryDelay: 1500,
-            timeout: 15000 // Increase timeout to 15 seconds
-          }
-        );
+      // Store the attempt ID
+      const attemptIdFromResponse = response.data?.attempt?.id;
+      if (attemptIdFromResponse) {
+        localStorage.setItem(`test_${currentTestId}_attempt_id`, attemptIdFromResponse);
         
-        return response.data;
-      } catch (submitError) {
-        // Extract more detailed error information
-        const statusCode = submitError.response?.status;
-        const errorMessage = submitError.response?.data?.message || submitError.message;
+        // Clear test data from localStorage
+        localStorage.removeItem(`test_${currentTestId}_answers`);
+        localStorage.removeItem(`test_${currentTestId}_startTime`);
         
-        console.error('Error submitting test:', {
-          statusCode,
-          errorMessage,
-          testId: id,
-          error: submitError
-        });
-        
-        // Try to get a more detailed error message from the server response
-        if (submitError.response?.data) {
-          console.error('Server error details:', submitError.response.data);
-          
-          // Check for MongoDB duplicate key error
-          const errorText = submitError.response.data.error || '';
-          if (errorText.includes('E11000 duplicate key error')) {
-            console.log('Detected MongoDB duplicate key error - test was already submitted');
-            
-            // Create a special error object to signal this is a duplicate submission
-            const duplicateError = new Error('Test already submitted');
-            duplicateError.isDuplicateSubmission = true;
-            duplicateError.originalError = submitError;
-            throw duplicateError;
-          }
-        }
-        
-        throw submitError;
+        // Redirect to results page using the correct route format
+        const userId = user.uid;
+        window.location.href = `/test-results/${currentTestId}/${userId}`;
+      } else {
+        console.error('No attempt ID received in response');
+        toast.error('Error accessing results. Redirecting to tests page...');
+        window.location.href = '/tests';
       }
+      
+      return response.data;
+      
     } catch (error) {
-      console.error('Error submitting test:', error);
-      throw error;
+      console.error('Error during test submission:', error);
+      
+      // Handle different types of errors
+      if (error.response) {
+        // Server responded with error
+        const status = error.response.status;
+        const errorMessage = error.response.data?.message || 'Unknown error occurred';
+        
+        if (status === 409) {
+          // Test already submitted
+          setHasBeenSubmitted(true);
+          toast.info('This test was already submitted');
+          
+          // Try to redirect to results
+          const attemptId = error.response.data?.attempt?.id || 
+                          localStorage.getItem(`test_${currentTestId}_attempt_id`);
+          
+          if (attemptId) {
+            window.location.href = `/tests/${currentTestId}/results/${attemptId}`;
+            return;
+          }
+        } else if (status === 401 || status === 403) {
+          setSubmitError('Not authorized to submit this test');
+          toast.error('Please login again to submit the test');
+        } else if (status === 404) {
+          setSubmitError('Test not found');
+          toast.error('The test you are trying to submit could not be found');
+        } else {
+          setSubmitError(errorMessage);
+          toast.error(`Submission failed: ${errorMessage}`);
+        }
+      } else if (error.request) {
+        // Request made but no response
+        setSubmitError('Network error occurred');
+        toast.error('Network error. Please check your connection and try again');
+      } else {
+        // Error in request setup
+        setSubmitError(error.message || 'Failed to submit test');
+        toast.error(error.message || 'Failed to submit test');
+      }
+      
+      return null;
     } finally {
       setIsSubmitting(false);
+      setShowSubmitModal(false);
     }
   };
 
@@ -953,116 +852,82 @@ export const TestAttemptProvider = ({ children }) => {
     setShowSubmitModal(true);
   };
 
-  // Handle submit
+  // Handle submit with retry logic
   const handleSubmit = async () => {
+    if (isSubmitting) {
+      console.log('Test is already being submitted');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const loadingToast = toast.loading('Submitting test...');
+
     try {
-      setIsSubmitting(true);
-      setShowSubmitModal(false);
-      
-      // Try to submit test with retry logic
-      let attempts = 0;
-      const maxAttempts = 3;
-      let result = null;
-      let lastError = null;
-      
-      while (attempts < maxAttempts && !result) {
-        try {
-          console.log(`Submitting test attempt ${attempts + 1}/${maxAttempts}`);
-          result = await submitTest();
-          if (result) {
-            console.log('Test submitted successfully:', result);
-            break;
-          }
-        } catch (error) {
-          // Get more specific error information
-          const statusCode = error.response?.status;
-          const errorDetails = error.response?.data?.message || error.message || 'Unknown error';
-          
-          console.error(`Error during attempt ${attempts + 1}:`, {
-            statusCode,
-            errorDetails,
-            error
-          });
-          
-          // Check if this is a duplicate submission error (test already submitted)
-          if (error.isDuplicateSubmission) {
-            console.log('Duplicate submission detected, stopping retry attempts');
-            // Set lastError to this special error and break out of the retry loop
-            lastError = error;
-            break;
-          }
-          
-          lastError = error;
-          attempts++;
-          
-          if (attempts < maxAttempts) {
-            // Wait before retrying
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
-        }
+      // Validate we have a test ID
+      if (!currentTestId) {
+        throw new Error('No test ID available');
       }
-      
-      if (result) {
-        toast.success('Test submitted successfully!');
-        return result;
-      } else {
-        // Check for duplicate submission error specifically
-        if (lastError && lastError.isDuplicateSubmission) {
-          toast.success('This test was already submitted. Redirecting to results page...', { 
-            autoClose: 3000 
-          });
+
+      // Get final test stats before submission
+      const finalStats = getTestStats();
+      console.log('Submitting test with stats:', finalStats);
+
+      // Create submission payload
+      const payload = {
+        answers,
+        timeLeft,
+        testId: currentTestId
+      };
+
+      try {
+        // Make the submission request
+        const response = await api.post(`/api/tests/${currentTestId}/submit`, payload);
+        
+        if (response.data && response.data.attempt) {
+          // Handle successful submission
+          console.log('Submission successful:', response.data);
+          toast.dismiss(loadingToast);
+          toast.success('Test submitted successfully!');
           
-          // Return a special result to indicate this was a duplicate submission 
-          // but not technically an error
-          return { 
-            status: 'already_submitted',
-            message: 'Test was already submitted previously'
-          };
+          // Clear test data from localStorage
+          localStorage.removeItem(`test_${currentTestId}_answers`);
+          localStorage.removeItem(`test_${currentTestId}_time`);
+          localStorage.removeItem(`test_${currentTestId}_status`);
+          
+          return response.data;
+        } else {
+          throw new Error('Invalid response format from server');
+        }
+      } catch (error) {
+        // Handle specific error cases
+        if (error.response?.status === 409) {
+          // Test already submitted
+          toast.dismiss(loadingToast);
+          toast.info('This test was already submitted');
+          return error.response.data;
         }
         
-        // Provide a more informative error message based on the server response
-        let errorMsg = 'Failed to submit test';
-        let errorDetails = '';
-        
-        // Check for the specific MongoDB duplicate key error
-        const errorResponse = lastError?.response?.data;
-        const errorText = errorResponse?.error || '';
-        
-        if (errorText.includes('E11000 duplicate key error')) {
-          // This is a duplicate submission - the test was already submitted
-          errorMsg = 'Test already submitted';
-          errorDetails = 'You have already submitted this test. Please go to your results page to view your score.';
-          
-          // Navigate to results page after a short delay
-          setTimeout(() => {
-            // Use window.location to ensure a full page reload
-            window.location.href = `/test-results/${currentTestId}/${user.firebaseId || user.uid}`;
-          }, 3000);
-          
-          toast.success('Redirecting to your test results...', { autoClose: 3000 });
-          return null;
-        } else if (lastError?.response?.status === 500) {
-          errorMsg = 'Server error while submitting test';
-          errorDetails = 'The server encountered an internal error. Your answers have been saved and you can try submitting again.';
-        } else if (lastError?.response?.status === 403) {
-          errorMsg = 'Not authorized to submit this test';
-          errorDetails = lastError.response?.data?.message || 'You may need to purchase this test or log in again.';
-        } else if (lastError?.response?.status === 404) {
-          errorMsg = 'Test not found';
-          errorDetails = 'The test you are trying to submit could not be found on the server.';
-        } else if (lastError?.message) {
-          errorDetails = lastError.message;
+        if (error.response?.status === 401) {
+          // Authentication error
+          toast.dismiss(loadingToast);
+          toast.error('Your session has expired. Please log in again.');
+          throw new Error('Authentication failed');
         }
         
-        // Show a toast with the error message
-        toast.error(`${errorMsg}: ${errorDetails}`);
+        if (error.response?.status === 500) {
+          toast.dismiss(loadingToast);
+          toast.error('Server error. Please try again.');
+          throw new Error('Server error occurred');
+        }
         
-        return null;
+        // For other errors, throw them to be caught by the outer try-catch
+        throw error;
       }
     } catch (error) {
-      toast.error('Error submitting test: ' + (error.message || 'Unknown error'));
       console.error('Submit error:', error);
-      return null;
+      toast.dismiss(loadingToast);
+      toast.error(error.message || 'Failed to submit test. Please try again.');
+      throw error;
     } finally {
       setIsSubmitting(false);
     }
@@ -1174,7 +1039,8 @@ export const TestAttemptProvider = ({ children }) => {
     showSubmitModal,
     setShowSubmitModal,
     showSidebar,
-    toggleSidebar
+    toggleSidebar,
+    submitError
   };
 
   return (

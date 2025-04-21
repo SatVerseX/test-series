@@ -283,7 +283,7 @@ router.get('/:id/stats', verifyToken, async (req, res) => {
       .limit(10)
       .populate({
         path: 'testId',
-        select: 'title description subject grade'
+        select: 'title description subject grade passingScore'
       });
 
     // Calculate stats
@@ -297,18 +297,29 @@ router.get('/:id/stats', verifyToken, async (req, res) => {
     const totalTime = 0; // This would require tracking start and end times
     
     // Format the recently completed tests
-    const recentTests = testAttempts.map(attempt => ({
-      id: attempt._id,
-      testId: attempt.testId?._id,
-      title: attempt.testId?.title || 'Unknown Test',
-      subject: attempt.testId?.subject || 'N/A',
-      score: attempt.score || 0,
-      passed: attempt.passed || false,
-      completedAt: attempt.completedAt,
-      status: attempt.status,
-      correctAnswers: attempt.correctAnswers || 0,
-      totalQuestions: attempt.testId?.totalQuestions || 0
-    }));
+    const recentTests = testAttempts.map(attempt => {
+      // Get passing threshold from the test, default to 50%
+      const passingThreshold = attempt.testId?.passingScore || 50;
+      
+      // Determine if test was passed based on score >= passing threshold
+      // This overrides the stored passed value
+      const hasPassed = attempt.status === 'completed' && 
+                        typeof attempt.score === 'number' && 
+                        attempt.score >= passingThreshold;
+      
+      return {
+        id: attempt._id,
+        testId: attempt.testId?._id,
+        title: attempt.testId?.title || 'Unknown Test',
+        subject: attempt.testId?.subject || 'N/A',
+        score: attempt.score || 0,
+        passed: hasPassed,  // Use calculated value
+        completedAt: attempt.completedAt,
+        status: attempt.status,
+        correctAnswers: attempt.correctAnswers || 0,
+        totalQuestions: attempt.testId?.totalQuestions || 0
+      };
+    });
 
     res.json({
       testsTaken,

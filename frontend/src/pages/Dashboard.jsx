@@ -22,6 +22,7 @@ import { useNavigate } from "react-router-dom";
 import Leaderboard from "../components/leaderboard/Leaderboard";
 import CategoryWelcome from "../components/dashboard/CategoryWelcome";
 import { formatDistanceToNow } from 'date-fns';
+import { addCacheBusting } from "../utils/clearCache";
 
 const Dashboard = () => {
   const { user, api } = useAuth();
@@ -53,7 +54,10 @@ const Dashboard = () => {
 
       try {
         setLoading(true);
-        const response = await api.get(`/api/users/${user.firebaseId}/stats`);
+        const response = await api.get(
+          `/api/users/${user.firebaseId}/stats`, 
+          addCacheBusting()
+        );
         console.log('User stats received:', response.data);
         setStats(response.data);
         setError(null);

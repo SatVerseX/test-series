@@ -649,210 +649,183 @@ router.post('/:id/save-progress', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Submit Test Attempt
-router.post('/:id/attempt', verifyToken, async (req, res) => {
+// Enhanced function to check if an answer is correct
+const isAnswerCorrect = (question, userAnswer) => {
+  if (!userAnswer) return false;
+  
+  // Normalize answers for comparison
+  const normalizeValue = (val) => {
+    if (val === undefined || val === null) return '';
+    return String(val).toLowerCase().trim();
+  };
+  
+  const normalizedUserAnswer = normalizeValue(userAnswer);
+  const normalizedCorrectAnswer = normalizeValue(question.correctAnswer);
+  
+  // Direct match
+  if (normalizedUserAnswer === normalizedCorrectAnswer) {
+    return true;
+  }
+  
+  // For MCQ and true/false questions
+  if (question.type === 'mcq' || question.type === 'trueFalse') {
+    // Try to match by option ID or text
+    if (question.options && question.options.length > 0) {
+      // First find which option contains the correct answer
+      const correctOption = question.options.find(opt => {
+        const optText = typeof opt === 'object' ? opt.text : opt;
+        return normalizeValue(optText) === normalizedCorrectAnswer;
+      });
+      
+      if (correctOption) {
+        const correctOptionId = typeof correctOption === 'object' ? correctOption._id.toString() : null;
+        const correctOptionText = typeof correctOption === 'object' ? correctOption.text : correctOption;
+        
+        // Check if user answer matches the correct option ID or text
+        if (userAnswer === correctOptionId || 
+            normalizedUserAnswer === normalizeValue(correctOptionText)) {
+          return true;
+        }
+      }
+    }
+    
+    // Special handling for true/false
+    if (question.type === 'trueFalse') {
+      const trueValues = ['true', '1', 't', 'yes'];
+      const falseValues = ['false', '0', 'f', 'no'];
+      
+      if ((trueValues.includes(normalizedUserAnswer) && trueValues.includes(normalizedCorrectAnswer)) ||
+          (falseValues.includes(normalizedUserAnswer) && falseValues.includes(normalizedCorrectAnswer))) {
+        return true;
+      }
+    }
+  }
+  
+  return false;
+};
+
+// Test submission endpoint
+router.post('/:id/submit', verifyToken, async (req, res) => {
   try {
-    const test = await Test.findById(req.params.id);
+    const testId = req.params.id;
+    const userId = req.user.firebaseId;
+    const { answers, timeLeft } = req.body;
+
+    console.log(`Test submission request for test ${testId} by user ${userId}`);
+    console.log(`Received ${Object.keys(answers || {}).length} answers and timeLeft: ${timeLeft}`);
+
+    // Validate test exists
+    const test = await Test.findById(testId);
     if (!test) {
       return res.status(404).json({ message: 'Test not found' });
     }
-    
-    // Check if test is paid and user has access
-    if (test.isPaid) {
-      let hasAccess = false;
-      
-      // If req.dbUser is not available (which happens sometimes),
-      // check if user is admin or teacher based on role property directly
-      if (!req.dbUser) {
-        // Add user to req.dbUser for later use
-        req.dbUser = req.user;
-      }
-      
-      // Check if user is admin/teacher or creator
-      if ((req.dbUser.isAdmin && req.dbUser.isAdmin()) || 
-          (req.dbUser.isTeacher && req.dbUser.isTeacher()) || 
-          req.dbUser.role === 'admin' ||
-          req.dbUser.role === 'teacher' ||
-          test.createdBy === req.user.firebaseId) {
-        hasAccess = true;
-      } else if (test.isSeriesTest && test.seriesId) {
-        // Check if user has purchased the series
-        if (req.dbUser.hasPurchased) {
-          hasAccess = await req.dbUser.hasPurchased(test.seriesId);
-        } else {
-          // Fallback if method is missing
-          const purchasedSeries = req.dbUser.purchasedSeries || [];
-          hasAccess = purchasedSeries.some(p => 
-            p.seriesId && p.seriesId.toString() === test.seriesId.toString()
-          );
-        }
-      } else {
-        // Check if user has purchased the individual test
-        if (Purchase) {
-          hasAccess = await Purchase.hasPurchased(req.dbUser._id, test._id);
-        }
-      }
-      
-      if (!hasAccess) {
-        return res.status(403).json({ 
-          message: 'You need to purchase this test to submit it.',
-          isPaid: true
-        });
-      }
-    }
 
-    // Create a new test attempt instead of finding/updating
-    // This allows users to retake tests multiple times
-    const attempt = new TestAttempt({
-      testId: test._id,
-      userId: req.user.firebaseId,
-      answers: req.body.answers || {},
-      status: 'completed',
-      startedAt: req.body.startedAt || new Date()
+    // Check if test is already submitted
+    const existingAttempt = await TestAttempt.findOne({
+      testId: testId,
+      userId: userId,
+      status: 'completed'
     });
-    
-    console.log(`Created new attempt for user ${req.user.firebaseId} on test ${test._id}`);
-    console.log('Received answers:', Object.keys(req.body.answers || {}).length);
-    
-    try {
-      // Calculate score
-      let totalQuestions = test.questions.length || 0;
-      let correctAnswers = 0;
-      let totalMarks = 0;
-      let obtainedMarks = 0;
 
-      // For each question in the test
-      for (const question of test.questions) {
-        const questionMarks = question.marks || 1; // Default to 1 mark if not specified
-        totalMarks += questionMarks;
-        
-        const userAnswer = attempt.answers[question._id];
-        
-        // Skip if no answer provided
-        if (!userAnswer) {
-          continue;
+    if (existingAttempt) {
+      console.log(`Test already submitted by user ${userId} for test ${testId}`);
+      return res.status(409).json({
+        message: 'Test already submitted',
+        attempt: {
+          id: existingAttempt._id
         }
-
-        // Check if answer is correct based on question type
-        let isCorrect = false;
-        if (question.type === 'mcq' || question.type === 'trueFalse') {
-          // For MCQ and True/False, ensure case-insensitive comparison
-          const normalizedUserAnswer = String(userAnswer).toLowerCase().trim();
-          const normalizedCorrectAnswer = String(question.correctAnswer).toLowerCase().trim();
-          isCorrect = normalizedUserAnswer === normalizedCorrectAnswer;
-        } else if (question.type === 'shortAnswer') {
-          // For short answer, do a case-insensitive comparison
-          const normalizedUserAnswer = String(userAnswer).toLowerCase().trim();
-          const normalizedCorrectAnswer = String(question.correctAnswer).toLowerCase().trim();
-          isCorrect = normalizedUserAnswer === normalizedCorrectAnswer;
-        } else if (question.type === 'integer') {
-          // For integer, handle potential parsing errors
-          try {
-            const userInt = parseInt(userAnswer);
-            const correctInt = parseInt(question.correctAnswer);
-            isCorrect = !isNaN(userInt) && !isNaN(correctInt) && userInt === correctInt;
-          } catch (parseError) {
-            console.error('Error parsing integer:', parseError);
-            isCorrect = false;
-          }
-        }
-        
-        if (isCorrect) {
-          correctAnswers++;
-          obtainedMarks += questionMarks;
-        }
-      }
-
-      // Calculate score as percentage
-      const score = totalMarks > 0 ? Math.round((obtainedMarks / totalMarks) * 100) : 0;
-      const passed = score >= (test.passingScore || 0);
-      
-      console.log('Scoring results:');
-      console.log('- Total questions:', totalQuestions);
-      console.log('- Correct answers:', correctAnswers);
-      console.log('- Total marks:', totalMarks);
-      console.log('- Obtained marks:', obtainedMarks);
-      console.log('- Score:', score + '%');
-      console.log('- Passing score:', test.passingScore + '%');
-      console.log('- Passed:', passed);
-
-      // Update the attempt with score details before saving
-      attempt.score = Number(score);
-      attempt.correctAnswers = Number(correctAnswers);
-      attempt.passed = Boolean(passed);
-      attempt.completedAt = new Date();
-      
-      // Save the attempt
-      await attempt.save();
-      console.log('Successfully saved test attempt with ID:', attempt._id);
-      
-      // Update test statistics
-      test.attempts += 1;
-      test.averageScore = ((test.averageScore * (test.attempts - 1)) + score) / test.attempts;
-      await test.save();
-
-      // Update user test history
-      if (req.dbUser) {
-        req.dbUser.testHistory.push({
-          testId: test._id,
-          score,
-          completedAt: new Date(),
-          timeTaken: req.body.timeTaken || 0
-        });
-        
-        await req.dbUser.save();
-      }
-
-      // If test is part of a series, update progress in the user's purchasedSeries
-      if (test.isSeriesTest && test.seriesId && req.dbUser) {
-        const purchasedSeriesIndex = req.dbUser.purchasedSeries.findIndex(
-          purchase => purchase.seriesId.toString() === test.seriesId.toString()
-        );
-        
-        if (purchasedSeriesIndex >= 0) {
-          const purchaseSeries = req.dbUser.purchasedSeries[purchasedSeriesIndex];
-          
-          // Update progress
-          purchaseSeries.progress.testsAttempted += 1;
-          if (passed) {
-            purchaseSeries.progress.testsCompleted += 1;
-          }
-          
-          // Update average score
-          const currentTotal = purchaseSeries.progress.averageScore * 
-                              (purchaseSeries.progress.testsAttempted - 1);
-          purchaseSeries.progress.averageScore = 
-            (currentTotal + score) / purchaseSeries.progress.testsAttempted;
-          
-          await req.dbUser.save();
-        }
-      }
-
-      res.json({ 
-        message: 'Test submitted successfully', 
-        attempt: attempt,
-        score,
-        passed,
-        totalQuestions,
-        correctAnswers
-      });
-    } catch (scoringError) {
-      console.error('Error in test scoring process:', scoringError);
-      res.status(500).json({ 
-        message: 'Error scoring test', 
-        error: scoringError.message,
-        stack: scoringError.stack
       });
     }
+
+    // Find or create test attempt
+    let attempt = await TestAttempt.findOne({
+      testId: testId,
+      userId: userId,
+      status: 'in_progress'
+    });
+
+    if (!attempt) {
+      console.log(`Creating new test attempt for user ${userId} on test ${testId}`);
+      attempt = new TestAttempt({
+        testId: testId,
+        userId: userId,
+        answers: {},
+        status: 'in_progress',
+        startedAt: new Date()
+      });
+    }
+
+    // Calculate score
+    let correctAnswers = 0;
+    let totalQuestions = test.questions.length;
+    let correctQuestionIds = [];
+    
+    // Validate answers object
+    if (!answers || typeof answers !== 'object') {
+      console.error('Invalid answers format:', answers);
+      return res.status(400).json({ message: 'Invalid answers format' });
+    }
+    
+    // Process each answer
+    Object.entries(answers).forEach(([questionId, answer]) => {
+      const question = test.questions.find(q => q._id.toString() === questionId);
+      if (question && isAnswerCorrect(question, answer)) {
+        correctAnswers++;
+        correctQuestionIds.push(questionId);
+      }
+    });
+
+    const score = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
+    const isPassed = score >= (test.passingScore || 60);
+
+    console.log(`Calculated score: ${score}%, correct answers: ${correctAnswers}/${totalQuestions}, passed: ${isPassed}`);
+
+    // Update attempt with final data
+    attempt.answers = answers;
+    attempt.score = score;
+    attempt.correctAnswers = correctAnswers;
+    attempt.correctQuestionIds = correctQuestionIds;
+    attempt.timeLeft = timeLeft;
+    attempt.status = 'completed';
+    attempt.completedAt = new Date();
+    attempt.isPassed = isPassed;
+    attempt.submissionAttempts = (attempt.submissionAttempts || 0) + 1;
+    attempt.lastSubmissionAttempt = new Date();
+
+    // Save the attempt
+    await attempt.save();
+    console.log(`Successfully saved test attempt ${attempt._id}`);
+
+    // Return success response
+    return res.status(200).json({
+        message: 'Test submitted successfully', 
+      attempt: {
+        id: attempt._id,
+        score,
+        correctAnswers,
+        totalQuestions,
+        isPassed
+      }
+    });
+
   } catch (error) {
-    console.error('Error submitting test:', error);
-    res.status(500).json({ 
+    console.error('Test submission error:', error);
+    return res.status(500).json({
       message: 'Error submitting test', 
-      error: error.message,
-      stack: error.stack
+      error: error.message
     });
   }
 });
+
+// Helper function to check if arrays are equal (for multiple-select questions)
+function arraysEqual(arr1, arr2) {
+  if (!Array.isArray(arr1) || !Array.isArray(arr2) || arr1.length !== arr2.length) {
+    return false;
+  }
+  
+  // Convert both arrays to strings after sorting for comparison
+  return JSON.stringify(arr1.sort()) === JSON.stringify(arr2.sort());
+}
 
 // Get available filters for tests
 router.get('/filters', verifyToken, async (req, res) => {
@@ -913,31 +886,38 @@ router.get('/:testId/attempts/:userId', verifyToken, async (req, res) => {
   }
 });
 
-// Get test progress
+// Get test progress for a user
 router.get('/:id/progress/:userId', verifyToken, async (req, res) => {
   try {
-    const { id, userId } = req.params;
-    
-    // Check if the user is authorized (admin, test owner, or the user who took the test)
-    if (userId !== req.user.firebaseId && !req.dbUser.isAdmin() && req.dbUser.role !== 'teacher') {
-      return res.status(403).json({ error: 'You are not authorized to view this test progress' });
+    const { id: testId, userId } = req.params;
+
+    // Verify the requesting user has permission to view this progress
+    if (req.user.firebaseId !== userId && !req.user.isAdmin) {
+      return res.status(403).json({ error: 'Not authorized to view this progress' });
     }
-    
-    // Find the most recent in-progress attempt for this user and test
-    const testAttempt = await TestAttempt.findOne({ 
-      testId: id, 
+
+    // Find the most recent in-progress attempt
+    const attempt = await TestAttempt.findOne({
+      testId,
       userId,
       status: 'in_progress'
-    }).sort({ createdAt: -1 });
+    }).sort({ startedAt: -1 });
     
-    if (!testAttempt) {
+    if (!attempt) {
       return res.status(404).json({ error: 'No test progress found' });
     }
     
-    res.json(testAttempt);
-  } catch (error) {
-    console.error('Error fetching test progress:', error);
-    res.status(500).json({ error: 'Error fetching test progress', details: error.message });
+    // Return progress data
+    res.json({
+      answers: attempt.answers || {},
+      timeLeft: attempt.timeLeft || 0,
+      startTime: attempt.startedAt,
+      status: attempt.status,
+      saveTimestamp: new Date()
+    });
+  } catch (err) {
+    console.error('Error fetching test progress:', err);
+    res.status(500).json({ error: 'Failed to fetch test progress' });
   }
 });
 
@@ -945,7 +925,7 @@ router.get('/:id/progress/:userId', verifyToken, async (req, res) => {
 router.put('/:testId/attempts/:userId/update-status', verifyToken, async (req, res) => {
   try {
     const { testId, userId } = req.params;
-    const { passed } = req.body;
+    const { status, passed } = req.body;
     
     // Check if the user is authorized (admin, test owner, or the user who took the test)
     if (userId !== req.user.firebaseId && !req.dbUser.isAdmin() && req.dbUser.role !== 'teacher') {
@@ -962,11 +942,32 @@ router.put('/:testId/attempts/:userId/update-status', verifyToken, async (req, r
       return res.status(404).json({ error: 'Test attempt not found' });
     }
     
-    // Update the passed status
-    testAttempt.passed = passed;
+    // Get the test details to get the passing score
+    const test = await Test.findById(testId);
+    if (!test) {
+      return res.status(404).json({ error: 'Test not found' });
+    }
+    
+    // If status is being updated to completed, ensure passed is calculated correctly
+    if (status === 'completed' || testAttempt.status === 'completed') {
+      // Calculate passed status based on score vs passing threshold
+      const passingThreshold = test.passingScore || 50;
+      const shouldBePassed = testAttempt.score >= passingThreshold;
+      
+      // Update the status and passed fields
+      if (status) testAttempt.status = status;
+      testAttempt.passed = shouldBePassed; // Use calculated value
+      
+      console.log(`Calculated passed status for test attempt ${testAttempt._id}: score ${testAttempt.score}% >= threshold ${passingThreshold}% = ${shouldBePassed}`);
+    } else {
+      // For in-progress tests or explicit passed value
+      if (status) testAttempt.status = status;
+      if (passed !== undefined) testAttempt.passed = passed;
+    }
+    
     await testAttempt.save();
     
-    console.log(`Updated test attempt ${testAttempt._id} passed status to ${passed}`);
+    console.log(`Updated test attempt ${testAttempt._id}: status=${testAttempt.status}, passed=${testAttempt.passed}`);
     
     res.json({ 
       message: 'Test attempt status updated successfully', 
@@ -978,19 +979,19 @@ router.put('/:testId/attempts/:userId/update-status', verifyToken, async (req, r
   }
 });
 
-// Manual update of test attempt score - emergency fallback endpoint
+// Add a route to manually update a test score (for fixing incorrect scores)
 router.put('/:testId/attempts/:userId/update-score', verifyToken, async (req, res) => {
   try {
     const { testId, userId } = req.params;
-    const { score, correctAnswers, passed } = req.body;
+    const { score, correctAnswers, passed, correctQuestionIds } = req.body;
     
-    // Check if the user is authorized (admin, test owner, or the user who took the test)
+    // Check if the user is authorized
     if (userId !== req.user.firebaseId && !req.dbUser.isAdmin() && req.dbUser.role !== 'teacher') {
       return res.status(403).json({ error: 'You are not authorized to update this test attempt' });
     }
     
-    console.log(`[DEBUG] Received manual score update for test ${testId}, user ${userId}`);
-    console.log(`[DEBUG] - Score: ${score}, correctAnswers: ${correctAnswers}, passed: ${passed}`);
+    console.log(`[Manual Score Update] Test: ${testId}, User: ${userId}`);
+    console.log(`[Manual Score Update] Score: ${score}, Correct answers: ${correctAnswers}, Passed: ${passed}`);
     
     // Find the test attempt
     const testAttempt = await TestAttempt.findOne({ 
@@ -1002,23 +1003,26 @@ router.put('/:testId/attempts/:userId/update-score', verifyToken, async (req, re
       return res.status(404).json({ error: 'Test attempt not found' });
     }
     
-    console.log(`[DEBUG] Found test attempt ${testAttempt._id}`);
+    console.log(`[Manual Score Update] Found test attempt ${testAttempt._id}`);
     
-    // Try multiple methods to update the score
+    // Update the test attempt with multiple methods for robustness
     
-    // Method 1: Direct object property update and save
+    // 1. Direct property update
     testAttempt.score = Number(score);
     testAttempt.correctAnswers = Number(correctAnswers);
     testAttempt.passed = Boolean(passed);
+    if (correctQuestionIds) {
+      testAttempt.correctQuestionIds = correctQuestionIds;
+    }
     
     try {
       await testAttempt.save();
-      console.log(`[DEBUG] Method 1 success: Updated via save()`);
+      console.log(`[Manual Score Update] Success: Updated via save()`);
     } catch (saveError) {
-      console.error(`[DEBUG] Method 1 failed:`, saveError);
+      console.error(`[Manual Score Update] Direct save failed:`, saveError);
     }
     
-    // Method 2: Mongoose updateOne
+    // 2. Mongoose updateOne (as backup)
     try {
       const updateResult = await TestAttempt.updateOne(
         { _id: testAttempt._id },
@@ -1026,39 +1030,19 @@ router.put('/:testId/attempts/:userId/update-score', verifyToken, async (req, re
           $set: { 
             score: Number(score),
             correctAnswers: Number(correctAnswers),
-            passed: Boolean(passed)
+            passed: Boolean(passed),
+            ...(correctQuestionIds ? { correctQuestionIds } : {})
           }
         }
       );
-      console.log(`[DEBUG] Method 2 success: Mongoose updateOne result:`, updateResult);
+      console.log(`[Manual Score Update] Success: Mongoose updateOne result:`, updateResult);
     } catch (updateError) {
-      console.error(`[DEBUG] Method 2 failed:`, updateError);
-    }
-    
-    // Method 3: Direct MongoDB collection update
-    try {
-      const directResult = await TestAttempt.collection.updateOne(
-        { _id: testAttempt._id },
-        { 
-          $set: { 
-            score: Number(score),
-            correctAnswers: Number(correctAnswers),
-            passed: Boolean(passed)
-          }
-        }
-      );
-      console.log(`[DEBUG] Method 3 success: Direct MongoDB update result:`, directResult);
-    } catch (directError) {
-      console.error(`[DEBUG] Method 3 failed:`, directError);
+      console.error(`[Manual Score Update] updateOne failed:`, updateError);
     }
     
     // Verify the update
     const updatedAttempt = await TestAttempt.findById(testAttempt._id);
-    console.log(`[DEBUG] Verification - updated attempt:`, {
-      score: updatedAttempt.score,
-      correctAnswers: updatedAttempt.correctAnswers,
-      passed: updatedAttempt.passed
-    });
+    console.log(`[Manual Score Update] Verification - updated score:`, updatedAttempt.score);
     
     res.json({ 
       message: 'Test attempt score updated successfully', 

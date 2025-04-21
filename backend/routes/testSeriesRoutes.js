@@ -6,6 +6,7 @@ const Purchase = require('../models/Purchase');
 const { verifyToken, isAdmin, isTeacher } = require('../middleware/auth');
 const Test = require('../models/Test');
 const mongoose = require('mongoose');
+const TestAttempt = require('../models/TestAttempt');
 
 // Get all test series (public)
 router.get('/', async (req, res) => {
@@ -393,6 +394,157 @@ router.post('/admin/sync-tests', verifyToken, isAdmin, async (req, res) => {
   } catch (err) {
     console.error('Error syncing tests with series:', err);
     res.status(500).json({ error: 'Failed to sync tests with series' });
+  }
+});
+
+// Get test series stats
+router.get('/:id/stats', verifyToken, async (req, res) => {
+  try {
+    const testSeries = await TestSeries.findById(req.params.id)
+      .populate('tests', 'title totalQuestions passingScore');
+    
+    if (!testSeries) {
+      return res.status(404).json({ error: 'Test series not found' });
+    }
+
+    // Get all attempts for tests in this series
+    const testIds = testSeries.tests.map(test => test._id);
+    const attempts = await TestAttempt.find({
+      testId: { $in: testIds },
+      status: 'completed'
+    });
+
+    // Calculate statistics
+    const stats = {
+      totalAttempts: attempts.length,
+      averageScore: 0,
+      passRate: 0,
+      totalStudents: new Set(attempts.map(a => a.userId)).size,
+      testWiseStats: {}
+    };
+
+    // Calculate test-wise statistics
+    testSeries.tests.forEach(test => {
+      const testAttempts = attempts.filter(a => a.testId.toString() === test._id.toString());
+      const passedAttempts = testAttempts.filter(a => a.isPassed);
+      
+      stats.testWiseStats[test._id] = {
+        title: test.title,
+        attempts: testAttempts.length,
+        averageScore: testAttempts.length ? 
+          testAttempts.reduce((sum, a) => sum + a.score, 0) / testAttempts.length : 0,
+        passRate: testAttempts.length ? 
+          (passedAttempts.length / testAttempts.length) * 100 : 0
+      };
+    });
+
+    // Calculate overall statistics
+    if (attempts.length > 0) {
+      stats.averageScore = attempts.reduce((sum, a) => sum + a.score, 0) / attempts.length;
+      stats.passRate = (attempts.filter(a => a.isPassed).length / attempts.length) * 100;
+    }
+
+    res.json(stats);
+  } catch (err) {
+    console.error('Error fetching test series stats:', err);
+    res.status(500).json({ error: 'Failed to fetch test series stats' });
+  }
+});
+
+// Get test series leaderboard
+router.get('/:id/leaderboard', verifyToken, async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const testSeries = await TestSeries.findById(req.params.id)
+      .populate('tests', '_id');
+    
+    if (!testSeries) {
+      return res.status(404).json({ error: 'Test series not found' });
+    }
+
+    const testIds = testSeries.tests.map(test => test._id);
+
+    // Aggregate to get user scores across all tests in the series
+    const leaderboard = await TestAttempt.aggregate([
+      {
+        $match: {
+          testId: { $in: testIds },
+          status: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: '$userId',
+          totalScore: { $avg: '$score' },
+          testsCompleted: { $sum: 1 },
+          lastAttemptDate: { $max: '$completedAt' }
+        }
+      },
+      {
+        $sort: { totalScore: -1, lastAttemptDate: -1 }
+      },
+      {
+        $skip: skip
+      },
+      {
+        $limit: limit
+      }
+    ]);
+
+    // Get user details for the leaderboard entries
+    const userIds = leaderboard.map(entry => entry._id);
+    const users = await User.find(
+      { firebaseId: { $in: userIds } },
+      'firebaseId name email profilePicture'
+    );
+
+    // Map user details to leaderboard entries
+    const leaderboardWithUsers = leaderboard.map(entry => {
+      const user = users.find(u => u.firebaseId === entry._id);
+      return {
+        userId: entry._id,
+        name: user?.name || 'Anonymous',
+        email: user?.email,
+        profilePicture: user?.profilePicture,
+        totalScore: Math.round(entry.totalScore * 100) / 100,
+        testsCompleted: entry.testsCompleted,
+        lastAttemptDate: entry.lastAttemptDate
+      };
+    });
+
+    // Get total count for pagination
+    const totalEntries = await TestAttempt.aggregate([
+      {
+        $match: {
+          testId: { $in: testIds },
+          status: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: '$userId'
+        }
+      },
+      {
+        $count: 'total'
+      }
+    ]);
+
+    res.json({
+      leaderboard: leaderboardWithUsers,
+      pagination: {
+        page,
+        limit,
+        total: totalEntries[0]?.total || 0,
+        pages: Math.ceil((totalEntries[0]?.total || 0) / limit)
+      }
+    });
+  } catch (err) {
+    console.error('Error fetching leaderboard:', err);
+    res.status(500).json({ error: 'Failed to fetch leaderboard' });
   }
 });
 

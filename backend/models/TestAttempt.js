@@ -11,9 +11,14 @@ const testAttemptSchema = new mongoose.Schema({
     required: true
   },
   answers: {
-    type: Map,
-    of: String,
-    default: {}
+    type: Object,
+    default: {},
+    validate: {
+      validator: function(v) {
+        return v !== null && typeof v === 'object';
+      },
+      message: 'Answers must be an object'
+    }
   },
   status: {
     type: String,
@@ -24,13 +29,21 @@ const testAttemptSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  passed: {
+  isPassed: {
+    type: Boolean,
+    default: false
+  },
+  isImprovement: {
     type: Boolean,
     default: false
   },
   correctAnswers: {
     type: Number,
     default: 0
+  },
+  correctQuestionIds: {
+    type: [String],
+    default: []
   },
   startedAt: {
     type: Date,
@@ -43,6 +56,17 @@ const testAttemptSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  timeTaken: {
+    type: Number,
+    default: 0
+  },
+  submissionAttempts: {
+    type: Number,
+    default: 0
+  },
+  lastSubmissionAttempt: {
+    type: Date
+  },
   __v: {
     type: Number,
     default: 0
@@ -51,9 +75,9 @@ const testAttemptSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Modified: Create a compound index but NOT unique, to allow multiple attempts
-// This allows finding the latest attempt for a user-test combination quickly
-testAttemptSchema.index({ testId: 1, userId: 1, createdAt: -1 });
+// Create a compound index with unique:false explicitly specified
+// This allows multiple attempts for the same user-test combination
+testAttemptSchema.index({ testId: 1, userId: 1, createdAt: -1 }, { unique: false });
 
 // Enhanced pre-save hook for data validation and type conversion
 testAttemptSchema.pre('save', function(next) {
@@ -69,10 +93,19 @@ testAttemptSchema.pre('save', function(next) {
     console.log(`[DEBUG] Pre-save hook: Ensuring correctAnswers is a number: ${this.correctAnswers}`);
   }
   
-  // Ensure passed is a boolean
-  if (this.passed !== undefined) {
-    this.passed = Boolean(this.passed);
-    console.log(`[DEBUG] Pre-save hook: Ensuring passed is a boolean: ${this.passed}`);
+  // Ensure isPassed is a boolean (and handle the old field name passed for backward compatibility)
+  if (this.isPassed !== undefined) {
+    this.isPassed = Boolean(this.isPassed);
+    console.log(`[DEBUG] Pre-save hook: Ensuring isPassed is a boolean: ${this.isPassed}`);
+  } else if (this.passed !== undefined) {
+    // For backwards compatibility, map the old field to the new one
+    this.isPassed = Boolean(this.passed);
+    console.log(`[DEBUG] Pre-save hook: Mapping old passed field to isPassed: ${this.isPassed}`);
+  }
+  
+  // Ensure isImprovement is a boolean
+  if (this.isImprovement !== undefined) {
+    this.isImprovement = Boolean(this.isImprovement);
   }
   
   // Set completedAt if status is completed and completedAt is not set
@@ -80,7 +113,29 @@ testAttemptSchema.pre('save', function(next) {
     this.completedAt = new Date();
   }
   
+  // Calculate time taken if completed
+  if (this.status === 'completed' && this.completedAt && this.startedAt && !this.timeTaken) {
+    const durationMs = new Date(this.completedAt) - new Date(this.startedAt);
+    this.timeTaken = Math.round(durationMs / 1000); // Store in seconds
+  }
+  
+  // Track submission attempts
+  if (this.isModified('status') && this.status === 'completed') {
+    this.submissionAttempts = (this.submissionAttempts || 0) + 1;
+    this.lastSubmissionAttempt = new Date();
+  }
+  
   next();
+});
+
+// Virtual getter for backward compatibility
+testAttemptSchema.virtual('passed').get(function() {
+  return this.isPassed;
+});
+
+// Virtual setter for backward compatibility
+testAttemptSchema.virtual('passed').set(function(value) {
+  this.isPassed = Boolean(value);
 });
 
 const TestAttempt = mongoose.model('TestAttempt', testAttemptSchema);

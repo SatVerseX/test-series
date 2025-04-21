@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Container, Typography, Box, CircularProgress, Paper, Divider, Grid, Button, 
   Chip, useMediaQuery, useTheme, Avatar, IconButton, LinearProgress, Tooltip,
-  SpeedDial, SpeedDialIcon, SpeedDialAction, Collapse, Card, CardContent
+  SpeedDial, SpeedDialIcon, SpeedDialAction, Collapse, Card, CardContent, alpha
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
@@ -25,6 +25,34 @@ import { format } from 'date-fns';
 import CountUp from 'react-countup';
 import { motion, AnimatePresence } from 'framer-motion';
 import confetti from 'canvas-confetti';
+import {
+  AccessTime as AccessTimeIcon,
+  ArrowBack as ArrowBackIcon,
+  Assessment as AssessmentIcon,
+  Help as HelpIcon
+} from '@mui/icons-material';
+
+// Add color constants for consistent styling
+const COLORS = {
+  success: {
+    light: 'rgba(46, 125, 50, 0.1)',
+    main: 'rgba(46, 125, 50, 0.9)',
+    border: 'rgba(46, 125, 50, 0.3)',
+    text: '#1b5e20'
+  },
+  error: {
+    light: 'rgba(211, 47, 47, 0.1)',
+    main: 'rgba(211, 47, 47, 0.9)',
+    border: 'rgba(211, 47, 47, 0.3)',
+    text: '#b71c1c'
+  },
+  warning: {
+    light: 'rgba(245, 124, 0, 0.1)',
+    main: 'rgba(245, 124, 0, 0.9)',
+    border: 'rgba(245, 124, 0, 0.3)',
+    text: '#e65100'
+  }
+};
 
 const TestResultsPage = () => {
   const { testId, userId } = useParams();
@@ -387,26 +415,64 @@ const TestResultsPage = () => {
     }
   };
 
+  const formatTime = (seconds) => {
+    if (!seconds) return '0m 0s';
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+  };
+
   if (loading) {
     return (
-      <Container sx={{ py: 4, textAlign: 'center' }}>
-        <CircularProgress />
-        <Typography sx={{ mt: 2 }}>Loading test results...</Typography>
-      </Container>
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        minHeight: '70vh' 
+      }}>
+        <CircularProgress size={60} />
+      </Box>
     );
   }
 
   if (error) {
     return (
-      <Container sx={{ py: 4, textAlign: 'center' }}>
-        <Typography color="error">{error}</Typography>
-        <Button 
-          variant="contained" 
-          onClick={() => navigate('/tests')} 
-          sx={{ mt: 2 }}
+      <Container>
+        <Paper 
+          elevation={0}
+          sx={{ 
+            p: 3, 
+            mt: 4, 
+            textAlign: 'center',
+            borderRadius: '20px',
+            border: `1px solid ${theme.palette.divider}`,
+            background: theme.palette.mode === 'dark'
+              ? 'linear-gradient(145deg, rgba(40,40,40,1) 0%, rgba(30,30,30,1) 100%)'
+              : 'linear-gradient(145deg, rgba(255,255,255,1) 0%, rgba(250,250,250,1) 100%)',
+            boxShadow: theme.palette.mode === 'dark'
+              ? '0 8px 32px rgba(0,0,0,0.3)'
+              : '0 8px 32px rgba(0,0,0,0.08)'
+          }}
         >
-          Back to Tests
-        </Button>
+          <Typography variant="h5" color="error" gutterBottom>
+            {error}
+          </Typography>
+          <Button 
+            variant="contained" 
+            onClick={() => navigate('/dashboard')}
+            startIcon={<ArrowBackIcon />}
+            sx={{
+              borderRadius: '12px',
+              transition: 'all 0.2s ease-in-out',
+              '&:hover': {
+                transform: 'translateY(-2px)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              }
+            }}
+          >
+            Back to Dashboard
+          </Button>
+        </Paper>
       </Container>
     );
   }
@@ -428,196 +494,259 @@ const TestResultsPage = () => {
 
   const score = testAttempt.score || 0;
   const correctAnswers = testAttempt.correctAnswers || 0;
+  const incorrectAnswers = testAttempt.incorrectAnswers || 0;
   const totalQuestions = testData.questions?.length || 0;
+  const unattemptedQuestions = totalQuestions - (correctAnswers + incorrectAnswers);
   const timeTaken = testAttempt.timeTaken || 0;
   const averageTimePerQuestion = totalQuestions ? Math.round(timeTaken / totalQuestions) : 0;
   const completionSpeed = averageTimePerQuestion > 180 ? 'Slow' : averageTimePerQuestion > 90 ? 'Moderate' : 'Fast';
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
+    <Container maxWidth="lg">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
         <Paper 
-          elevation={3} 
+          elevation={0}
           sx={{ 
-            ...premiumStyles.glassCard,
-            p: 4,
+            p: { xs: 2, sm: 3, md: 4 }, 
+            mt: 2, 
+            borderRadius: '20px',
             background: theme.palette.mode === 'dark'
-              ? 'linear-gradient(135deg, rgba(66, 66, 66, 0.9), rgba(33, 33, 33, 0.95))'
-              : 'linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(240, 240, 240, 0.9))'
+              ? 'linear-gradient(145deg, rgba(40,40,40,1) 0%, rgba(30,30,30,1) 100%)'
+              : 'linear-gradient(145deg, rgba(255,255,255,1) 0%, rgba(250,250,250,1) 100%)',
+            boxShadow: theme.palette.mode === 'dark'
+              ? '0 8px 32px rgba(0,0,0,0.3)'
+              : '0 8px 32px rgba(0,0,0,0.08)',
+            border: `1px solid ${theme.palette.divider}`
           }}
         >
-              <Typography 
-            variant="h3" 
-            gutterBottom 
-            align="center" 
-            sx={premiumStyles.gradientText}
-          >
-            {testData.title}
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+            <IconButton 
+              onClick={() => navigate('/dashboard')}
+              sx={{ 
+                mr: 2,
+                transition: 'all 0.2s ease-in-out',
+                '&:hover': {
+                  transform: 'scale(1.1)'
+                }
+              }}
+            >
+              <ArrowBackIcon />
+            </IconButton>
+            <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
+              Test Results
+            </Typography>
+          </Box>
 
-          {/* Animated Score Circle */}
-          <Box 
-                  sx={{
-              ...premiumStyles.scoreCircle,
-              '--score-color': getScoreColor(score),
-              '--score-percent': `${score}%`
+          <Typography 
+            variant="h5" 
+            gutterBottom 
+            sx={{ 
+              color: theme.palette.primary.main,
+              mb: 3
             }}
           >
-            <Typography variant="h2" sx={premiumStyles.gradientText}>
-                    <CountUp 
-                end={score} 
-                      suffix="%" 
-                duration={2.5} 
-                decimals={1}
-                    />
-                  </Typography>
-                </Box>
+            {testData?.title}
+          </Typography>
 
-          {/* Achievement Badge */}
-          <Box sx={{ textAlign: 'center', my: 4 }}>
-              <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ type: "spring", stiffness: 260, damping: 20 }}
-            >
-              <Chip
-                icon={testAttempt.isPassed ? <EmojiEventsIcon /> : <StarIcon />}
-                label={testAttempt.isPassed ? 'Achievement Unlocked! 🏆' : 'Keep Going! 💪'}
-                    sx={{ 
-                  p: 3,
-                  fontSize: '1.2rem',
-                  background: testAttempt.isPassed 
-                    ? 'linear-gradient(45deg, #00b894, #00cec9)'
-                    : 'linear-gradient(45deg, #fdcb6e, #e17055)',
-                  color: 'white',
-                  '& .MuiChip-icon': {
-                    color: 'white'
-                  }
-                }}
-              />
-              </motion.div>
-                </Box>
-
-          {/* Stats Grid with Animation */}
-          <Grid container spacing={3} sx={{ mb: 4 }}>
-            {[
-              {
-                title: 'Correct Answers',
-                value: `${correctAnswers}/${totalQuestions}`,
-                icon: <CheckCircleIcon />,
-                color: '#00b894'
-              },
-              {
-                title: 'Time Taken',
-                value: `${Math.floor(timeTaken / 60)}m ${timeTaken % 60}s`,
-                icon: <TimerIcon />,
-                color: '#0984e3'
-              },
-              {
-                title: 'Avg. Time/Question',
-                value: `${averageTimePerQuestion}s`,
-                icon: <SpeedIcon />,
-                color: '#6c5ce7'
-              },
-              {
-                title: 'Completion Speed',
-                value: completionSpeed,
-                icon: <TrendingUpIcon />,
-                color: '#e84393'
+          {/* Score Overview Card */}
+          <Card 
+            elevation={0}
+            sx={{ 
+              mb: 4,
+              borderRadius: '16px',
+              background: theme.palette.mode === 'dark'
+                ? 'linear-gradient(145deg, rgba(45,45,45,1) 0%, rgba(35,35,35,1) 100%)'
+                : 'linear-gradient(145deg, rgba(250,250,250,1) 0%, rgba(245,245,245,1) 100%)',
+              border: `1px solid ${theme.palette.divider}`,
+              transition: 'transform 0.2s ease-in-out',
+              '&:hover': {
+                transform: 'translateY(-2px)'
               }
-            ].map((stat, index) => (
-              <Grid item xs={12} sm={6} md={3} key={index}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                >
-                  <Card 
-                    sx={{ 
-                      ...premiumStyles.glassCard,
-                      ...premiumStyles.statCard
-                    }}
-                  >
-                    <CardContent>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                        <Avatar sx={{ bgcolor: stat.color }}>
-                          {stat.icon}
-                  </Avatar>
-                        <Typography variant="h6" sx={{ ml: 1 }}>
-                          {stat.title}
-                  </Typography>
-                </Box>
-                      <Typography variant="h4" sx={{ color: stat.color }}>
-                        {stat.value}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-              </motion.div>
-            </Grid>
-            ))}
-          </Grid>
-
-          {/* Action Buttons with Hover Effects */}
-          <Box sx={{ mt: 4, display: 'flex', justifyContent: 'center', gap: 3 }}>
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button 
-                variant="contained" 
-                onClick={() => navigate(`/tests/${testId}/review`)}
-                startIcon={<MenuBookIcon />}
-                sx={{ 
-                  background: 'linear-gradient(45deg, #00b894, #00cec9)',
-                  px: 4,
-                  py: 1.5,
-                  borderRadius: '12px',
-                  '&:hover': {
-                    background: 'linear-gradient(45deg, #00cec9, #00b894)'
-                  }
-                }}
-              >
-                Review Test
-              </Button>
-            </motion.div>
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-            <Button 
-                variant="outlined" 
-                onClick={() => navigate('/tests')}
-                startIcon={<TimelineIcon />}
-              sx={{ 
-                  px: 4,
-                py: 1.5,
-                  borderRadius: '12px',
-                  borderWidth: '2px'
-                }}
-              >
-                Back to Tests
-            </Button>
-          </motion.div>
-        </Box>
-
-          {/* Share Results SpeedDial */}
-          <SpeedDial
-            ariaLabel="Share Results"
-            sx={{ position: 'fixed', bottom: 16, right: 16 }}
-            icon={<ShareIcon />}
+            }}
           >
-            {[
-              { icon: <FacebookIcon />, name: 'Facebook', action: () => shareResult('facebook') },
-              { icon: <TwitterIcon />, name: 'Twitter', action: () => shareResult('twitter') },
-              { icon: <WhatsAppIcon />, name: 'WhatsApp', action: () => shareResult('whatsapp') },
-              { icon: <LinkedInIcon />, name: 'LinkedIn', action: () => shareResult('linkedin') }
-            ].map((action) => (
-              <SpeedDialAction
-                key={action.name}
-                icon={action.icon}
-                tooltipTitle={action.name}
-                onClick={action.action}
-              />
-            ))}
-          </SpeedDial>
+            <CardContent>
+              <Box 
+                sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  mb: 3
+                }}
+              >
+                <Avatar 
+                  sx={{ 
+                    width: 80, 
+                    height: 80, 
+                    bgcolor: score >= 70 
+                      ? COLORS.success.light 
+                      : score >= 40 
+                        ? COLORS.warning.light 
+                        : COLORS.error.light,
+                    color: score >= 70 
+                      ? COLORS.success.text 
+                      : score >= 40 
+                        ? COLORS.warning.text 
+                        : COLORS.error.text,
+                    border: `2px solid ${score >= 70 
+                      ? COLORS.success.border 
+                      : score >= 40 
+                        ? COLORS.warning.border 
+                        : COLORS.error.border}`,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                  }}
+                >
+                  <Typography variant="h4">
+                    {score}%
+                  </Typography>
+                </Avatar>
+              </Box>
+
+              <Grid container spacing={3}>
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center',
+                    p: 2,
+                    borderRadius: '12px',
+                    bgcolor: COLORS.success.light,
+                    transition: 'transform 0.2s ease-in-out',
+                    '&:hover': { transform: 'translateY(-2px)' }
+                  }}>
+                    <Avatar sx={{ bgcolor: COLORS.success.main, mr: 2 }}>
+                      <CheckCircleIcon />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ color: COLORS.success.text }}>
+                        Correct
+                      </Typography>
+                      <Typography variant="h6" sx={{ color: COLORS.success.text, fontWeight: 600 }}>
+                        {correctAnswers}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center',
+                    p: 2,
+                    borderRadius: '12px',
+                    bgcolor: COLORS.error.light,
+                    transition: 'transform 0.2s ease-in-out',
+                    '&:hover': { transform: 'translateY(-2px)' }
+                  }}>
+                    <Avatar sx={{ bgcolor: COLORS.error.main, mr: 2 }}>
+                      <CancelIcon />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ color: COLORS.error.text }}>
+                        Incorrect
+                      </Typography>
+                      <Typography variant="h6" sx={{ color: COLORS.error.text, fontWeight: 600 }}>
+                        {incorrectAnswers}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center',
+                    p: 2,
+                    borderRadius: '12px',
+                    bgcolor: COLORS.warning.light,
+                    transition: 'transform 0.2s ease-in-out',
+                    '&:hover': { transform: 'translateY(-2px)' }
+                  }}>
+                    <Avatar sx={{ bgcolor: COLORS.warning.main, mr: 2 }}>
+                      <HelpIcon />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" sx={{ color: COLORS.warning.text }}>
+                        Unattempted
+                      </Typography>
+                      <Typography variant="h6" sx={{ color: COLORS.warning.text, fontWeight: 600 }}>
+                        {unattemptedQuestions}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center',
+                    p: 2,
+                    borderRadius: '12px',
+                    bgcolor: alpha(theme.palette.primary.main, 0.1),
+                    transition: 'transform 0.2s ease-in-out',
+                    '&:hover': { transform: 'translateY(-2px)' }
+                  }}>
+                    <Avatar sx={{ bgcolor: theme.palette.primary.main, mr: 2 }}>
+                      <AccessTimeIcon />
+                    </Avatar>
+                    <Box>
+                      <Typography variant="body2" color="primary">
+                        Time Taken
+                      </Typography>
+                      <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                        {formatTime(timeTaken)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+
+          {/* Action Buttons */}
+          <Box sx={{ 
+            display: 'flex', 
+            gap: 2,
+            flexWrap: 'wrap',
+            justifyContent: 'center'
+          }}>
+            <Button
+              variant="contained"
+              onClick={() => navigate(`/test-review/${testId}/${userId || user.id}`)}
+              startIcon={<AssessmentIcon />}
+              sx={{
+                borderRadius: '12px',
+                minWidth: '200px',
+                transition: 'all 0.2s ease-in-out',
+                background: `linear-gradient(45deg, ${theme.palette.primary.main}, ${theme.palette.primary.light})`,
+                '&:hover': {
+                  transform: 'translateY(-2px)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                }
+              }}
+            >
+              Review Test
+            </Button>
+
+            <Button
+              variant="outlined"
+              onClick={() => navigate('/dashboard')}
+              startIcon={<ArrowBackIcon />}
+              sx={{
+                borderRadius: '12px',
+                minWidth: '200px',
+                transition: 'all 0.2s ease-in-out',
+                '&:hover': {
+                  transform: 'translateY(-2px)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                }
+              }}
+            >
+              Back to Dashboard
+            </Button>
+          </Box>
         </Paper>
       </motion.div>
     </Container>

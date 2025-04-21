@@ -661,7 +661,7 @@ export const TestAttemptProvider = ({ children }) => {
                           localStorage.getItem(`test_${currentTestId}_attempt_id`);
           
           if (attemptId) {
-            window.location.href = `/tests/${currentTestId}/results/${attemptId}`;
+            window.location.href = `/tests-results/${currentTestId}/${attemptId}`;
             return;
           }
         } else if (status === 401 || status === 403) {

@@ -23,6 +23,7 @@ import TestSeriesList from './pages/tests/TestSeriesList';
 import TestSeriesForm from './pages/tests/TestSeriesForm';
 import TestSeriesEdit from './pages/tests/TestSeriesEdit';
 import MyTests from './pages/tests/MyTests';
+
 import Profile from './pages/Profile';
 import LibraryPage from './pages/Library';
 
@@ -32,6 +33,7 @@ import Settings from './pages/admin/Settings';
 import LeaderboardPage from './components/leaderboard/LeaderboardPage';
 import ForgotPassword from './pages/ForgotPassword';
 import TestResultsPage from './pages/TestResultsPage';
+import TestReviewPage from './pages/tests/TestReviewPage';
 import TestSeriesLeaderboardPage from './pages/tests/TestSeriesLeaderboardPage';
 import TestLeaderboardPage from './pages/tests/TestLeaderboardPage';
 import TestSeriesDetail from './pages/tests/TestSeriesDetail';
@@ -278,6 +280,7 @@ function App() {
                     <Route path="/test-series/:seriesId/leaderboard" element={<ProtectedRoute><TestSeriesLeaderboardPage /></ProtectedRoute>} />
                     <Route path="/test-series/:seriesId/test/:testId/leaderboard" element={<ProtectedRoute><TestLeaderboardPage /></ProtectedRoute>} />
                     <Route path="/test-series/:seriesId" element={<ProtectedRoute><TestSeriesDetail /></ProtectedRoute>} />
+                    
                     <Route path="/my-tests" element={<ProtectedRoute><MyTests /></ProtectedRoute>} />
                     <Route path="/test/edit/:testId" element={<AdminRoute><TestCreationPage /></AdminRoute>} />
                     <Route path="/test/create" element={<AdminRoute><TestCreationPage /></AdminRoute>} />
@@ -290,6 +293,8 @@ function App() {
                       } 
                     />
                     <Route path="/test-results/:testId/:userId" element={<ProtectedRoute><TestResultsPage /></ProtectedRoute>} />
+                    <Route path="/test-series/:seriesId/test/:testId/review" element={<ProtectedRoute><TestReviewPage /></ProtectedRoute>} />
+                    <Route path="/test-review/:testId/:userId" element={<ProtectedRoute><TestReviewPage /></ProtectedRoute>} />
                     <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
                     <Route path="/Leaderboard" element={<ProtectedRoute><LeaderboardPage /></ProtectedRoute>} />
                     <Route path="/admin" element={<AdminRoute><UserManagement /></AdminRoute>} />

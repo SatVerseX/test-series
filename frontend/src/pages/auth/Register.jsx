@@ -38,7 +38,7 @@ const steps = ['Personal Info', 'Account Details', 'Grade Selection'];
 
 const Register = () => {
   const navigate = useNavigate();
-  const { register } = useAuth();
+  const { register, signInWithGoogle } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [activeStep, setActiveStep] = useState(0);
@@ -47,6 +47,7 @@ const Register = () => {
   const [passwordStrength, setPasswordStrength] = useState(0);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
+  const isDarkMode = theme.palette.mode === 'dark';
   
   const [formData, setFormData] = useState({
     name: '',
@@ -176,6 +177,20 @@ const Register = () => {
       } else {
         setError(err.message || 'Registration failed. Please try again.');
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogleSignUp = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      await signInWithGoogle();
+      navigate('/dashboard');
+    } catch (error) {
+      console.error('Google sign-up error:', error);
+      setError('Failed to sign up with Google. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -361,9 +376,24 @@ const Register = () => {
         sx={{ 
           p: 4, 
           mt: 8, 
-          borderRadius: 2,
-          background: 'linear-gradient(to bottom right, #ffffff, #f5f5f5)',
-          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+          borderRadius: 3,
+          background: isDarkMode 
+            ? 'linear-gradient(145deg, #1e1e1e, #2d2d2d)' 
+            : 'linear-gradient(145deg, #ffffff, #f8f9fa)',
+          boxShadow: isDarkMode 
+            ? '0 10px 30px rgba(0, 0, 0, 0.3)' 
+            : '0 10px 30px rgba(0, 0, 0, 0.08)',
+          position: 'relative',
+          overflow: 'hidden',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: '6px',
+            background: 'linear-gradient(90deg, #3f51b5, #2196f3, #00bcd4)',
+          }
         }}
       >
         <Typography 
@@ -373,7 +403,9 @@ const Register = () => {
           gutterBottom
           sx={{ 
             fontWeight: 700,
-            color: theme.palette.primary.main,
+            background: 'linear-gradient(45deg, #3f51b5, #2196f3)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
             mb: 3
           }}
         >
@@ -381,12 +413,36 @@ const Register = () => {
         </Typography>
         
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
+          <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>
             {error}
           </Alert>
         )}
 
-        <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 4 }}>
+        <Stepper 
+          activeStep={activeStep} 
+          alternativeLabel 
+          sx={{ 
+            mb: 4,
+            '& .MuiStepLabel-root .Mui-active': {
+              color: '#3f51b5',
+            },
+            '& .MuiStepLabel-root .Mui-completed': {
+              color: '#2196f3',
+            },
+            '& .MuiStepConnector-line': {
+              borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)',
+            },
+            '& .MuiStepLabel-label': {
+              color: isDarkMode ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 0, 0, 0.6)',
+            },
+            '& .MuiStepLabel-label.Mui-active': {
+              color: isDarkMode ? '#90caf9' : '#3f51b5',
+            },
+            '& .MuiStepLabel-label.Mui-completed': {
+              color: isDarkMode ? '#64b5f6' : '#2196f3',
+            }
+          }}
+        >
           {steps.map((label) => (
             <Step key={label}>
               <StepLabel>{label}</StepLabel>
@@ -401,7 +457,13 @@ const Register = () => {
             <Button
               disabled={activeStep === 0}
               onClick={handleBack}
-              sx={{ mr: 1 }}
+              sx={{ 
+                mr: 1,
+                color: isDarkMode ? '#90caf9' : '#3f51b5',
+                '&:hover': {
+                  backgroundColor: isDarkMode ? 'rgba(144, 202, 249, 0.08)' : 'rgba(63, 81, 181, 0.04)',
+                }
+              }}
             >
               Back
             </Button>
@@ -415,10 +477,10 @@ const Register = () => {
                     px: 4,
                     py: 1,
                     borderRadius: 2,
-                    background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
-                    boxShadow: '0 3px 5px 2px rgba(33, 203, 243, .3)',
+                    background: 'linear-gradient(45deg, #3f51b5 30%, #2196f3 90%)',
+                    boxShadow: '0 3px 5px 2px rgba(33, 150, 243, .3)',
                     '&:hover': {
-                      background: 'linear-gradient(45deg, #1976D2 30%, #00BCD4 90%)',
+                      background: 'linear-gradient(45deg, #303f9f 30%, #1976d2 90%)',
                     }
                   }}
                 >
@@ -432,10 +494,10 @@ const Register = () => {
                     px: 4,
                     py: 1,
                     borderRadius: 2,
-                    background: 'linear-gradient(45deg, #2196F3 30%, #21CBF3 90%)',
-                    boxShadow: '0 3px 5px 2px rgba(33, 203, 243, .3)',
+                    background: 'linear-gradient(45deg, #3f51b5 30%, #2196f3 90%)',
+                    boxShadow: '0 3px 5px 2px rgba(33, 150, 243, .3)',
                     '&:hover': {
-                      background: 'linear-gradient(45deg, #1976D2 30%, #00BCD4 90%)',
+                      background: 'linear-gradient(45deg, #303f9f 30%, #1976d2 90%)',
                     }
                   }}
                 >
@@ -446,30 +508,67 @@ const Register = () => {
           </Box>
         </Box>
 
-        <Divider sx={{ my: 3 }}>OR</Divider>
+        <Divider sx={{ my: 3, color: 'text.secondary' }}>
+          <Typography variant="body2" sx={{ color: 'text.secondary' }}>OR</Typography>
+        </Divider>
 
         <Button
           fullWidth
           variant="outlined"
-          startIcon={<GoogleIcon />}
+          onClick={handleGoogleSignUp}
+          disabled={loading}
           sx={{ 
             mb: 2,
             py: 1,
-            borderRadius: 2,
-            borderColor: '#DB4437',
-            color: '#DB4437',
+            px: 2,
+            borderRadius: 1,
+            backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#fff',
+            borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.23)' : '#dadce0',
+            color: isDarkMode ? '#fff' : '#3c4043',
+            textTransform: 'none',
+            fontSize: '14px',
+            fontWeight: 500,
+            boxShadow: isDarkMode ? '0 1px 3px rgba(0, 0, 0, 0.3)' : '0 1px 3px rgba(60,64,67,0.15)',
             '&:hover': {
-              borderColor: '#C53929',
-              backgroundColor: 'rgba(219, 68, 55, 0.04)',
+              backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#f8f9fa',
+              borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.3)' : '#dadce0',
+              boxShadow: isDarkMode ? '0 1px 3px rgba(0, 0, 0, 0.3)' : '0 1px 3px rgba(60,64,67,0.15)',
+            },
+            '&:disabled': {
+              backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.05)' : '#f8f9fa',
+              color: isDarkMode ? 'rgba(255, 255, 255, 0.3)' : '#80868b',
             }
           }}
         >
-          Sign up with Google
+          <Box
+            component="img"
+            src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"
+            alt="Google logo"
+            sx={{ 
+              width: 18, 
+              height: 18, 
+              mr: 1.5,
+              display: 'inline-block',
+              verticalAlign: 'middle'
+            }}
+          />
+          {loading ? <CircularProgress size={20} sx={{ color: isDarkMode ? '#fff' : '#3c4043' }} /> : 'Sign up with Google'}
         </Button>
 
         <Grid container justifyContent="center">
           <Grid item>
-            <Link href="/login" variant="body2" sx={{ color: theme.palette.primary.main }}>
+            <Link 
+              href="/login" 
+              variant="body2" 
+              sx={{ 
+                color: isDarkMode ? '#90caf9' : '#3f51b5',
+                fontWeight: 500,
+                textDecoration: 'none',
+                '&:hover': {
+                  textDecoration: 'underline',
+                }
+              }}
+            >
               Already have an account? Sign in
             </Link>
           </Grid>

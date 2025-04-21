@@ -466,8 +466,10 @@ const Navbar = ({ toggleColorMode, mode }) => {
                     color: 'white',
                     fontSize: { xs: '1rem', sm: '1.2rem' },
                   }}
+                  src={user.photoURL}
+                  alt={user.displayName || 'User'}
                 >
-                  {user.displayName?.[0]?.toUpperCase()}
+                  {!user.photoURL && user.displayName?.[0]?.toUpperCase()}
                 </Avatar>
               </IconButton>
             </Tooltip>

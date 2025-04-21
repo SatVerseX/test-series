@@ -202,7 +202,8 @@ router.get('/:id', verifyToken, async (req, res) => {
       name: user.name,
       grade: user.grade,
       subjects: user.subjects,
-      role: user.role
+      role: user.role,
+      photoURL: user.photoURL
     });
   } catch (error) {
     console.error('Error fetching user:', error);
@@ -359,7 +360,8 @@ router.put('/:id', verifyToken, async (req, res) => {
       grade: user.grade,
       subjects: user.subjects,
       role: user.role,
-      testHistory: user.testHistory || []
+      testHistory: user.testHistory || [],
+      photoURL: user.photoURL
     });
   } catch (error) {
     console.error('Error updating user profile:', error);
@@ -505,14 +507,16 @@ router.post('/auth/google', async (req, res) => {
           name: name || decodedToken.name || decodedToken.email.split('@')[0],
           grade: grade || '',
           subjects: subjects || [],
-          role: 'student'
+          role: 'student',
+          photoURL: decodedToken.picture || null
         });
 
         await user.save();
         console.log('New user saved successfully:', {
           id: user._id,
           firebaseId: user.firebaseId,
-          role: user.role
+          role: user.role,
+          photoURL: user.photoURL
         });
       } catch (saveError) {
         console.error('=== Error Saving New User ===');
@@ -544,7 +548,8 @@ router.post('/auth/google', async (req, res) => {
         name: user.name,
         grade: user.grade,
         subjects: user.subjects,
-        role: user.role
+        role: user.role,
+        photoURL: user.photoURL
       }
     });
   } catch (error) {

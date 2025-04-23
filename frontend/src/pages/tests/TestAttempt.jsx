@@ -416,8 +416,8 @@ const TestAttempt = () => {
         // Close the modal
         setShowSubmitModal(false);
         
-        // Navigate to results page
-        navigate(`/tests/${testId}/results/${result.attempt.id}`);
+        // Navigate to results page with correct path format
+        navigate(`/test-results/${testId}/${result.attempt.id}`);
       }
     } catch (error) {
       console.error('Error submitting test:', error);
@@ -561,18 +561,31 @@ const TestAttempt = () => {
                   Previous
                 </Button>
 
-                <Button
-                  variant="contained"
-                  color="primary"
-                  onClick={nextQuestion}
-                  disabled={currentSection === test?.sections?.length - 1 && 
-                           currentQuestion === (test?.questions?.filter(q => 
-                             q.sectionTitle === test?.sections[currentSection]?.title
-                           ).length || 0) - 1}
-                  endIcon={<ArrowForwardIcon />}
-                >
-                  Next
-                </Button>
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  {!isMobile && (
+                    <Button
+                      variant="contained"
+                      color="success"
+                      onClick={confirmSubmit}
+                      startIcon={<SendIcon />}
+                    >
+                      Submit Test
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="contained"
+                    color="primary"
+                    onClick={nextQuestion}
+                    disabled={currentSection === test?.sections?.length - 1 && 
+                             currentQuestion === (test?.questions?.filter(q => 
+                               q.sectionTitle === test?.sections[currentSection]?.title
+                             ).length || 0) - 1}
+                    endIcon={<ArrowForwardIcon />}
+                  >
+                    Next
+                  </Button>
+                </Box>
               </Box>
             </Box>
             

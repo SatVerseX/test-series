@@ -74,6 +74,32 @@ const tableRowVariants = {
   exit: { opacity: 0, y: -20, transition: { duration: 0.3 } }
 };
 
+const getRankColor = (rank) => {
+  switch (rank) {
+    case 1:
+      return '#FFD700'; // Gold
+    case 2:
+      return '#C0C0C0'; // Silver
+    case 3:
+      return '#CD7F32'; // Bronze
+    default:
+      return 'inherit';
+  }
+};
+
+const getRankIcon = (rank) => {
+  switch (rank) {
+    case 1:
+      return <EmojiEventsIcon sx={{ color: '#FFD700' }} />;
+    case 2:
+      return <EmojiEventsIcon sx={{ color: '#C0C0C0' }} />;
+    case 3:
+      return <EmojiEventsIcon sx={{ color: '#CD7F32' }} />;
+    default:
+      return null;
+  }
+};
+
 const TestSeriesLeaderboard = ({ seriesId, testId, seriesTitle, testTitle }) => {
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -153,10 +179,22 @@ const TestSeriesLeaderboard = ({ seriesId, testId, seriesTitle, testTitle }) => 
     } finally {
       setLoading(false);
     }
-  }, [seriesId, testId, page, searchQuery, timeRange, isAuthenticated]);
+  }, [seriesId, testId, page, searchQuery, timeRange, isAuthenticated, rowsPerPage]);
   
   useEffect(() => {
-    fetchLeaderboard();
+    let isMounted = true;
+    
+    const loadData = async () => {
+      if (isMounted) {
+        await fetchLeaderboard();
+      }
+    };
+    
+    loadData();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [fetchLeaderboard]);
   
   const handleChangePage = (event, newPage) => {
@@ -371,20 +409,11 @@ const TestSeriesLeaderboard = ({ seriesId, testId, seriesTitle, testTitle }) => 
           </Box>
         )}
         
-        {/* Search and filter */}
-        <Box 
-          sx={{ 
-            mb: 3, 
-            display: 'flex', 
-            flexDirection: isTablet ? 'column' : 'row',
-            gap: 2 
-          }}
-        >
+        {/* Filters */}
+        <Box sx={{ mb: 3, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           <TextField
-            label="Search by name"
-            variant="outlined"
             size="small"
-            fullWidth={isTablet}
+            placeholder="Search participants..."
             value={searchQuery}
             onChange={handleSearchChange}
             InputProps={{
@@ -392,22 +421,21 @@ const TestSeriesLeaderboard = ({ seriesId, testId, seriesTitle, testTitle }) => 
                 <InputAdornment position="start">
                   <SearchIcon />
                 </InputAdornment>
-              ),
+              )
             }}
-            sx={{ flexGrow: 1 }}
+            sx={{ flexGrow: 1, maxWidth: 300 }}
           />
           
-          <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
-            <InputLabel id="time-range-label">Time Range</InputLabel>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Time Range</InputLabel>
             <Select
-              labelId="time-range-label"
               value={timeRange}
               onChange={handleTimeRangeChange}
               label="Time Range"
             >
               <MenuItem value="all">All Time</MenuItem>
-              <MenuItem value="week">This Week</MenuItem>
               <MenuItem value="month">This Month</MenuItem>
+              <MenuItem value="week">This Week</MenuItem>
             </Select>
           </FormControl>
         </Box>
@@ -421,39 +449,20 @@ const TestSeriesLeaderboard = ({ seriesId, testId, seriesTitle, testTitle }) => 
           <TableContainer>
             <Table>
               <TableHead>
-                <TableRow sx={{ '& th': { fontWeight: 'bold' } }}>
+                <TableRow>
                   <TableCell>Rank</TableCell>
-                  <TableCell>Name</TableCell>
+                  <TableCell>Participant</TableCell>
                   <TableCell>Score</TableCell>
-                  <TableCell>Accuracy</TableCell>
-                  {!isMobile && (
-                    <>
-                      <TableCell>Time</TableCell>
-                      <TableCell>Date</TableCell>
-                    </>
-                  )}
+                  <TableCell>Time Taken</TableCell>
+                  <TableCell>Completed</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {leaderboardData.map((entry, index) => {
-                  // Determine if this is the current user
-                  const isCurrentUser = user && entry.user._id === user._id;
-                  
-                  // Determine rank styling (top 3 get special treatment)
-                  let rankColor = 'text.secondary';
-                  let rankIcon = null;
-                  
-                  if (entry.rank === 1) {
-                    rankColor = 'warning.main'; // Gold
-                    rankIcon = <EmojiEventsIcon fontSize="small" sx={{ color: theme.palette.warning.main }} />;
-                  } else if (entry.rank === 2) {
-                    rankColor = 'grey.500'; // Silver
-                    rankIcon = <EmojiEventsIcon fontSize="small" sx={{ color: theme.palette.grey[500] }} />;
-                  } else if (entry.rank === 3) {
-                    rankColor = '#CD7F32'; // Bronze
-                    rankIcon = <EmojiEventsIcon fontSize="small" sx={{ color: '#CD7F32' }} />;
-                  }
-                  
+                  const isCurrentUser = entry.user.id === user?.id;
+                  const rankColor = getRankColor(entry.rank);
+                  const rankIcon = getRankIcon(entry.rank);
+
                   return (
                     <TableRow 
                       key={index}
@@ -521,41 +530,11 @@ const TestSeriesLeaderboard = ({ seriesId, testId, seriesTitle, testTitle }) => 
                         </Typography>
                       </TableCell>
                       <TableCell>
-                        <Chip 
-                          label={`${entry.accuracy}%`} 
-                          size="small"
-                          sx={{
-                            bgcolor: 
-                              entry.accuracy >= 90 ? alpha(theme.palette.success.main, 0.1) :
-                              entry.accuracy >= 70 ? alpha(theme.palette.info.main, 0.1) :
-                              entry.accuracy >= 50 ? alpha(theme.palette.warning.main, 0.1) :
-                              alpha(theme.palette.error.main, 0.1),
-                            color: 
-                              entry.accuracy >= 90 ? theme.palette.success.main :
-                              entry.accuracy >= 70 ? theme.palette.info.main :
-                              entry.accuracy >= 50 ? theme.palette.warning.main :
-                              theme.palette.error.main,
-                            fontWeight: 'medium'
-                          }}
-                        />
+                        {formatDuration(entry.timeTaken)}
                       </TableCell>
-                      {!isMobile && (
-                        <>
-                          <TableCell>
-                            <Tooltip title="Time taken to complete">
-                              <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center' }}>
-                                <AccessTimeIcon fontSize="small" sx={{ mr: 0.5, opacity: 0.7 }} />
-                                {formatDuration(entry.timeTaken)}
-                              </Typography>
-                            </Tooltip>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {new Date(entry.completedAt).toLocaleDateString()}
-                            </Typography>
-                          </TableCell>
-                        </>
-                      )}
+                      <TableCell>
+                        {new Date(entry.completedAt).toLocaleDateString()}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -565,17 +544,15 @@ const TestSeriesLeaderboard = ({ seriesId, testId, seriesTitle, testTitle }) => 
         )}
         
         {/* Pagination */}
-        {totalPages > 1 && (
-          <Box sx={{ mt: 3, display: 'flex', justifyContent: 'center' }}>
-            <Pagination 
-              count={totalPages} 
-              page={page} 
-              onChange={handleChangePage}
-              color="primary"
-              size={isMobile ? "small" : "medium"}
-            />
-          </Box>
-        )}
+        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+          <Pagination 
+            count={totalPages} 
+            page={page} 
+            onChange={handleChangePage}
+            color="primary"
+            shape="rounded"
+          />
+        </Box>
       </Paper>
     </motion.div>
   );

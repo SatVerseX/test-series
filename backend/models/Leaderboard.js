@@ -2,8 +2,7 @@ const mongoose = require('mongoose');
 
 const leaderboardSchema = new mongoose.Schema({
   userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
+    type: String,
     required: true
   },
   firebaseId: {
@@ -33,10 +32,19 @@ const leaderboardSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  subject: {
-    type: String,
-    enum: ['all', 'math', 'science', 'english'],
-    default: 'all'
+  seriesId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'TestSeries'
+  },
+  seriesName: {
+    type: String
+  },
+  testId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Test'
+  },
+  testName: {
+    type: String
   },
   timeRange: {
     type: String,
@@ -51,9 +59,8 @@ const leaderboardSchema = new mongoose.Schema({
   timestamps: true
 });
 
-
-leaderboardSchema.index({ subject: 1, timeRange: 1, score: -1 });
-leaderboardSchema.index({ userId: 1, subject: 1, timeRange: 1 });
+leaderboardSchema.index({ seriesId: 1, timeRange: 1, score: -1 });
+leaderboardSchema.index({ testId: 1, timeRange: 1, score: -1 });
 
 const Leaderboard = mongoose.model('Leaderboard', leaderboardSchema);
 

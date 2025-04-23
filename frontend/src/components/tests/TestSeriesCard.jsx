@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Box, 
   Card, 
@@ -26,18 +26,30 @@ import StarIcon from '@mui/icons-material/Star';
 import LocalOfferIcon from '@mui/icons-material/LocalOffer';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import { useTheme } from '@mui/material/styles';
+import BookmarkIcon from '@mui/icons-material/Bookmark';
+import BookmarkBorderIcon from '@mui/icons-material/BookmarkBorder';
+import axios from 'axios';
 
 const TestSeriesCard = ({ 
   series, 
   isPurchased = false, 
+  isSubscribed = false,
   onUnlock, 
   onStart, 
+  onSubscribe,
   progress = null, 
   showActions = true,
   delay = 0
 }) => {
   const theme = useTheme();
   const navigate = useNavigate();
+  const [subscribing, setSubscribing] = useState(false);
+  const [subscribed, setSubscribed] = useState(isSubscribed);
+  
+  // Update subscribed state when isSubscribed prop changes
+  useEffect(() => {
+    setSubscribed(isSubscribed);
+  }, [isSubscribed]);
   
   const isFree = !series.isPaid;
   const hasPurchased = isPurchased;
@@ -71,6 +83,23 @@ const TestSeriesCard = ({
   const handleStart = (e) => {
     e.stopPropagation();
     onStart(series);
+  };
+
+  const handleSubscribe = async (e) => {
+    e.stopPropagation();
+    if (subscribing) return;
+    
+    setSubscribing(true);
+    try {
+      if (onSubscribe) {
+        await onSubscribe(series._id);
+        setSubscribed(true);
+      }
+    } catch (error) {
+      console.error('Subscription error:', error);
+    } finally {
+      setSubscribing(false);
+    }
   };
   
   return (
@@ -409,25 +438,66 @@ const TestSeriesCard = ({
                 Continue
               </Button>
             ) : isFree ? (
-              <Button
-                variant="contained"
-                color="success"
-                size="small"
-                endIcon={<ArrowForwardIcon />}
-                onClick={handleStart}
-                sx={{
-                  borderRadius: 2,
-                  px: 2,
-                  textTransform: 'none',
-                  fontWeight: 600,
-                  boxShadow: `0 4px 12px ${alpha(theme.palette.success.main, 0.3)}`,
-                  '&:hover': {
-                    boxShadow: `0 6px 16px ${alpha(theme.palette.success.main, 0.4)}`,
-                  }
-                }}
-              >
-                Start Now
-              </Button>
+              <Stack direction="row" spacing={1}>
+                {!subscribed ? (
+                  <Button
+                    variant="outlined"
+                    color="info"
+                    size="small"
+                    startIcon={<BookmarkBorderIcon />}
+                    onClick={handleSubscribe}
+                    disabled={subscribing}
+                    sx={{
+                      borderRadius: 2,
+                      px: 2,
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      '&:hover': {
+                        boxShadow: `0 2px 8px ${alpha(theme.palette.info.main, 0.4)}`,
+                      }
+                    }}
+                  >
+                    {subscribing ? 'Subscribing...' : 'Subscribe'}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outlined"
+                    color="info"
+                    size="small"
+                    startIcon={<BookmarkIcon />}
+                    disabled
+                    sx={{
+                      borderRadius: 2,
+                      px: 2,
+                      textTransform: 'none',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Subscribed
+                  </Button>
+                )}
+                {subscribed && (
+                  <Button
+                    variant="contained"
+                    color="success"
+                    size="small"
+                    endIcon={<ArrowForwardIcon />}
+                    onClick={handleStart}
+                    sx={{
+                      borderRadius: 2,
+                      px: 2,
+                      textTransform: 'none',
+                      fontWeight: 600,
+                      boxShadow: `0 4px 12px ${alpha(theme.palette.success.main, 0.3)}`,
+                      '&:hover': {
+                        boxShadow: `0 6px 16px ${alpha(theme.palette.success.main, 0.4)}`,
+                      }
+                    }}
+                  >
+                    Start Now
+                  </Button>
+                )}
+              </Stack>
             ) : (
               <Button
                 variant="contained"

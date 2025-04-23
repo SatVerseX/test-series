@@ -148,6 +148,7 @@ const TestSeriesList = () => {
   const [error, setError] = useState(null);
   const [testSeries, setTestSeries] = useState([]);
   const [purchasedSeries, setPurchasedSeries] = useState([]);
+  const [subscribedSeries, setSubscribedSeries] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -225,6 +226,19 @@ const TestSeriesList = () => {
           });
         }
 
+        // Try to get user's subscribed series
+        try {
+          const subscribedResponse = await api.get('/api/test-series/user/subscribed');
+          if (subscribedResponse.data) {
+            console.log('Subscribed series data:', subscribedResponse.data);
+            setSubscribedSeries(subscribedResponse.data || []);
+          }
+        } catch (subscribeError) {
+          console.warn('User subscriptions API not implemented yet:', subscribeError);
+          // Use empty array for subscribed series if API fails
+          setSubscribedSeries([]);
+        }
+
         // If no tests in response, try to fetch associated tests for each series
         const processedSeriesWithTests = [...processedData];
         const seriesWithNoTests = processedData.filter(series => 
@@ -297,6 +311,12 @@ const TestSeriesList = () => {
     return purchasedSeries.some(series => series._id === seriesId);
   };
 
+  // Check if user has subscribed to a test series
+  const hasSubscribed = (seriesId) => {
+    if (!seriesId) return false;
+    return subscribedSeries.some(series => series._id === seriesId);
+  };
+
   // Handle unlock/purchase test series
   const handleUnlockSeries = (series) => {
     if (!user) {
@@ -332,6 +352,30 @@ const TestSeriesList = () => {
   const handleStartSeries = (series) => {
     // Navigate to the test series detail page
     navigate(`/test-series/${series._id}`);
+  };
+
+  // Handle subscribing to a test series
+  const handleSubscribeSeries = async (seriesId) => {
+    if (!user) {
+      // Redirect to login if not logged in
+      navigate('/login', { state: { from: `/test-series/${seriesId}` } });
+      return false;
+    }
+
+    try {
+      // Make API call to subscribe to the series
+      await api.post(`/api/test-series/${seriesId}/subscribe`);
+      
+      // Update local state
+      setSubscribedSeries(prev => [...prev, seriesId]);
+      
+      toast.success('Successfully subscribed to test series!');
+      return true; // Return success to the component
+    } catch (error) {
+      console.error('Error subscribing to test series:', error);
+      toast.error('Failed to subscribe to test series. Please try again.');
+      return false; // Return failure to the component
+    }
   };
 
   // Filter test series by selected category and search query
@@ -582,6 +626,7 @@ const TestSeriesList = () => {
           <Grid container spacing={4} sx={{ mt: 2 }}>
             {filteredSeries.map((series, index) => {
               const isPurchased = hasPurchased(series._id);
+              const isSubscribed = hasSubscribed(series._id);
               const progress = purchasedSeries.find(s => s._id === series._id)?.progress;
               
               return (
@@ -589,81 +634,17 @@ const TestSeriesList = () => {
                   <TestSeriesCard 
                     series={series}
                     isPurchased={isPurchased}
+                    isSubscribed={isSubscribed}
                     progress={progress}
                     onUnlock={handleUnlockSeries}
                     onStart={handleStartSeries}
+                    onSubscribe={handleSubscribeSeries}
                     delay={index * 0.05}
                   />
                 </Grid>
               );
             })}
           </Grid>
-        )}
-        
-        {/* My Tests Section */}
-        {user && purchasedSeries.length > 0 && (
-          <Box sx={{ mt: 6 }}>
-            <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', mb: 3 }}>
-              My Tests
-            </Typography>
-            
-            <Grid key="my-tests-grid" container spacing={3}>
-              {testSeries
-                .filter(series => purchasedSeries.includes(series.id))
-                .map((series, index) => (
-                  <Grid item xs={12} sm={6} md={3} key={`my-${series.id || index}`}>
-                    <Card sx={{ 
-                      height: '100%',
-                      borderRadius: 2,
-                      overflow: 'hidden',
-                      transition: 'all 0.3s ease',
-                      '&:hover': { transform: 'translateY(-5px)', boxShadow: 4 }
-                    }}>
-                      <CardMedia
-                        component="img"
-                        height="140"
-                        image={series.imageUrl || getCategoryImage(series.category)}
-                        alt={series.title}
-                      />
-                      <CardContent>
-                        <Typography variant="h6" gutterBottom>
-                          {series.title}
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                          <AssignmentIcon sx={{ fontSize: 16, mr: 0.5, color: 'text.secondary' }} />
-                          <Typography variant="body2" color="text.secondary">
-                            {series.totalTests} Tests
-                          </Typography>
-                        </Box>
-                      </CardContent>
-                      <CardActions sx={{ gap: 1 }}>
-                        <Button 
-                          variant="outlined"
-                          color="info"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigate(`/test-series/${series.id || series._id}/leaderboard`);
-                          }}
-                          startIcon={<BarChartIcon />}
-                          sx={{ flex: 1 }}
-                        >
-                          Leaderboard
-                        </Button>
-                        
-                        <Button 
-                          variant="contained"
-                          color="primary"
-                          onClick={() => handleStartSeries(series)}
-                          sx={{ flex: 1 }}
-                        >
-                          Continue
-                        </Button>
-                      </CardActions>
-                    </Card>
-                  </Grid>
-                ))}
-            </Grid>
-          </Box>
         )}
       </Container>
     </Box>

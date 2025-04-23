@@ -329,15 +329,21 @@ const Profile = () => {
         setError(null);
         const currentUser = auth.currentUser;
         if (!currentUser) {
-          throw new Error('No authenticated user');
+          console.error('No authenticated user found');
+          setError('Please log in to view your profile');
+          setLoading(false);
+          return;
         }
 
-        const token = await currentUser.getIdToken();
+        console.log('Fetching profile data for user:', currentUser.uid);
         
         try {
+          // First attempt to get user data directly
+          console.log('Attempting to fetch user profile...');
           const response = await api.get(`/api/users/${currentUser.uid}`);
+          console.log('Profile data received:', response.data);
+          
           setProfile(response.data);
-          setTestHistory(response.data.testHistory || []);
           setEditForm({
             name: response.data.name,
             grade: response.data.grade || '',
@@ -351,42 +357,89 @@ const Profile = () => {
             subjects: response.data.subjects || ''
           });
           
-          // Calculate stats for premium UI
-          const completedTests = response.data.testHistory?.length || 0;
-          const scores = response.data.testHistory?.map(test => test.score) || [];
-          const avgScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-          
-          setStats({
-            testsCompleted: completedTests,
-            averageScore: Math.round(avgScore),
-            activeSeries: 0, // Will be updated when we fetch purchased series
-            rank: getRankFromScore(avgScore)
-          });
+          // Now fetch user stats separately which includes test history
+          try {
+            console.log('Fetching user stats...');
+            const statsResponse = await api.get(`/api/users/${currentUser.uid}/stats`);
+            console.log('User stats received:', statsResponse.data);
+            
+            setTestHistory(statsResponse.data.recentTests || []);
+            
+            // Calculate stats for premium UI
+            const testsTaken = statsResponse.data.testsTaken || 0;
+            const averageScore = statsResponse.data.averageScore || 0;
+            
+            setStats({
+              testsCompleted: testsTaken,
+              averageScore: Math.round(averageScore),
+              activeSeries: 0, // Will be updated when we fetch purchased series
+              rank: getRankFromScore(averageScore)
+            });
+          } catch (statsError) {
+            console.error('Error fetching user stats:', statsError);
+            // Continue with the process even if stats fetch fails
+          }
           
         } catch (error) {
+          console.error('Error in initial profile fetch:', error);
+          
+          // If user not found (404), try to register/authenticate with Google
           if (error.response?.status === 404) {
-            const registerResponse = await api.post('/api/users/auth/google', {
-              idToken: token,
-              grade: '10th',
-              subjects: []
-            });
-            
-            const profileResponse = await api.get(`/api/users/${currentUser.uid}`);
-            setProfile(profileResponse.data);
-            setTestHistory(profileResponse.data.testHistory || []);
-            setEditForm({
-              name: profileResponse.data.name,
-              grade: profileResponse.data.grade || '',
-              subjects: profileResponse.data.subjects?.join(', ') || ''
-            });
-            setFormData({
-              name: profileResponse.data.name || '',
-              email: profileResponse.data.email || '',
-              phone: profileResponse.data.phone || '',
-              grade: profileResponse.data.grade || '',
-              subjects: profileResponse.data.subjects || ''
-            });
+            console.log('User not found, attempting to register with Google...');
+            try {
+              const token = await currentUser.getIdToken();
+              console.log('Got ID token, registering user...');
+              
+              const registerResponse = await api.post('/api/users/auth/google', {
+                idToken: token,
+                name: currentUser.displayName || '',
+                email: currentUser.email || '',
+                photoURL: currentUser.photoURL || '',
+                grade: '10th',
+                subjects: []
+              });
+              
+              console.log('Registration successful:', registerResponse.data);
+              
+              // Fetch the profile again after registration
+              const profileResponse = await api.get(`/api/users/${currentUser.uid}`);
+              console.log('Profile fetched after registration:', profileResponse.data);
+              
+              setProfile(profileResponse.data);
+              
+              // Try to fetch stats again after registration
+              try {
+                const statsResponse = await api.get(`/api/users/${currentUser.uid}/stats`);
+                setTestHistory(statsResponse.data.recentTests || []);
+                setStats({
+                  testsCompleted: statsResponse.data.testsTaken || 0,
+                  averageScore: Math.round(statsResponse.data.averageScore || 0),
+                  activeSeries: 0,
+                  rank: getRankFromScore(statsResponse.data.averageScore || 0)
+                });
+              } catch (statsError) {
+                console.error('Error fetching user stats after registration:', statsError);
+                // Continue even if stats fetch fails
+              }
+              
+              setEditForm({
+                name: profileResponse.data.name,
+                grade: profileResponse.data.grade || '',
+                subjects: profileResponse.data.subjects?.join(', ') || ''
+              });
+              setFormData({
+                name: profileResponse.data.name || '',
+                email: profileResponse.data.email || '',
+                phone: profileResponse.data.phone || '',
+                grade: profileResponse.data.grade || '',
+                subjects: profileResponse.data.subjects || ''
+              });
+            } catch (registerError) {
+              console.error('Error during registration process:', registerError);
+              throw new Error('Failed to register user profile');
+            }
           } else {
+            console.error('Unhandled error during profile fetch:', error);
             throw error;
           }
         }
@@ -394,8 +447,8 @@ const Profile = () => {
         // Fetch purchased test series
         await fetchPurchasedSeries();
       } catch (error) {
-        console.error('Error fetching profile:', error);
-        setError(error.response?.data?.error || 'Failed to load profile data');
+        console.error('Fatal error in profile fetching:', error);
+        setError(error.response?.data?.error || 'Failed to load profile data. Please try refreshing the page.');
         toast.error('Failed to load profile data');
       } finally {
         setLoading(false);
@@ -476,30 +529,52 @@ const Profile = () => {
   const fetchPurchasedSeries = async () => {
     try {
       setLoadingPurchases(true);
+      let allSeries = [];
       
       try {
-        const response = await api.get('/api/users/purchases/test-series');
-        
-        if (response.data) {
-          setPurchasedSeries(response.data);
-          setStats(prev => ({
-            ...prev,
-            activeSeries: response.data.length
-          }));
-        } else {
-          setPurchasedSeries([]);
+        // First fetch purchased series
+        const purchasedResponse = await api.get('/api/users/purchases/test-series');
+        if (purchasedResponse.data) {
+          allSeries = [...purchasedResponse.data];
         }
-      } catch (error) {
-        console.warn('Series purchases API not implemented yet:', error);
-        setPurchasedSeries([]);
-        // Update stats with empty data
-        setStats(prev => ({
-          ...prev,
-          activeSeries: 0
-        }));
+      } catch (purchaseError) {
+        console.warn('Purchased series API not implemented or failed:', purchaseError);
+        // Continue even if this fails
       }
+      
+      try {
+        // Then fetch subscribed series
+        const subscribedResponse = await api.get('/api/users/subscribed/test-series');
+        if (subscribedResponse.data) {
+          // Add a subscriptionType field to differentiate
+          const subscribedSeries = subscribedResponse.data.map(series => ({
+            ...series,
+            subscriptionType: 'free'
+          }));
+          allSeries = [...allSeries, ...subscribedSeries];
+        }
+      } catch (subscriptionError) {
+        console.warn('Subscribed series API failed:', subscriptionError);
+        // Continue even if this fails
+      }
+      
+      // Set all series in state
+      setPurchasedSeries(allSeries);
+      
+      // Update stats with total number of series
+      setStats(prev => ({
+        ...prev,
+        activeSeries: allSeries.length
+      }));
+      
     } catch (error) {
-      console.error('Error fetching purchased series:', error);
+      console.error('Error fetching series:', error);
+      setPurchasedSeries([]);
+      // Update stats with empty data
+      setStats(prev => ({
+        ...prev,
+        activeSeries: 0
+      }));
     } finally {
       setLoadingPurchases(false);
     }
@@ -507,16 +582,80 @@ const Profile = () => {
 
   if (loading) {
     return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-        <CircularProgress />
-      </Box>
+      <Container maxWidth="xl" sx={{ py: 4 }}>
+        <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" sx={{ py: 8 }}>
+          <CircularProgress size={60} thickness={4} />
+          <Typography variant="h6" sx={{ mt: 3, mb: 1 }}>
+            Loading your profile...
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            This may take a moment
+          </Typography>
+        </Box>
+      </Container>
     );
   }
 
   if (error) {
     return (
-      <Container maxWidth="lg" sx={{ mt: 4 }}>
-        <Alert severity="error">{error}</Alert>
+      <Container maxWidth="xl" sx={{ py: 4 }}>
+        <Alert 
+          severity="error" 
+          sx={{ 
+            borderRadius: 2,
+            py: 2,
+            display: 'flex',
+            alignItems: 'center'
+          }}
+        >
+          <Box>
+            <Typography variant="h6" sx={{ mb: 1 }}>
+              Unable to load profile
+            </Typography>
+            <Typography variant="body2">
+              {error}
+            </Typography>
+            <Button 
+              variant="outlined" 
+              color="error" 
+              size="small" 
+              sx={{ mt: 2 }}
+              onClick={() => window.location.reload()}
+            >
+              Retry
+            </Button>
+          </Box>
+        </Alert>
+      </Container>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <Container maxWidth="xl" sx={{ py: 4 }}>
+        <Alert 
+          severity="warning" 
+          sx={{ 
+            borderRadius: 2,
+            py: 2
+          }}
+        >
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Profile Not Found
+          </Typography>
+          <Typography variant="body2">
+            We couldn't find your profile information. Please try signing in again.
+          </Typography>
+          <Button 
+            variant="contained" 
+            color="primary" 
+            size="small" 
+            sx={{ mt: 2 }}
+            onClick={() => navigate('/login')}
+          >
+            Sign In
+          </Button>
+        </Alert>
       </Container>
     );
   }
@@ -992,15 +1131,15 @@ const Profile = () => {
                           {testHistory.slice(0, 5).map((test, index) => (
                             <Box 
                               key={index} 
-            sx={{ 
+                              sx={{ 
                                 p: 2,
-              borderRadius: 2,
+                                borderRadius: 2,
                                 bgcolor: theme.palette.background.paper,
                                 boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
                               }}
                             >
                               <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                                {test.testName}
+                                {test.title}
                               </Typography>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
                                 <Chip 
@@ -1010,9 +1149,9 @@ const Profile = () => {
                                   variant="outlined"
                                 />
                                 <Typography variant="caption" color="text.secondary">
-                                  {new Date(test.date).toLocaleDateString()}
-              </Typography>
-            </Box>
+                                  {new Date(test.completedAt).toLocaleDateString()}
+                                </Typography>
+                              </Box>
                             </Box>
                           ))}
                           
@@ -1057,9 +1196,9 @@ const Profile = () => {
                     <Grid container spacing={3}>
                       {purchasedSeries.map((series, index) => (
                         <Grid item xs={12} sm={6} md={4} key={index}>
-                  <Paper
-                    elevation={0}
-                    sx={{
+                          <Paper
+                            elevation={0}
+                            sx={{
                               p: 3,
                               borderRadius: 2,
                               height: '100%',
@@ -1067,7 +1206,7 @@ const Profile = () => {
                               flexDirection: 'column',
                               boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
                               transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                      '&:hover': {
+                              '&:hover': {
                                 transform: 'translateY(-5px)',
                                 boxShadow: '0 6px 25px rgba(0,0,0,0.1)',
                               }
@@ -1081,30 +1220,56 @@ const Profile = () => {
                             }}>
                               <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                                 {series.title}
-                        </Typography>
-                              <Chip 
-                                label={series.category} 
-                                size="small" 
-                                color="primary"
-                                sx={{ fontWeight: 600 }}
-                              />
+                              </Typography>
+                              <Box>
+                                <Chip 
+                                  label={series.category} 
+                                  size="small" 
+                                  color="primary"
+                                  sx={{ fontWeight: 600, mb: 1 }}
+                                />
+                                {series.subscriptionType === 'free' ? (
+                                  <Chip
+                                    label="Free"
+                                    size="small"
+                                    color="success"
+                                    sx={{ 
+                                      fontWeight: 600, 
+                                      ml: 1, 
+                                      bgcolor: theme.palette.success.light,
+                                      color: theme.palette.success.contrastText
+                                    }}
+                                  />
+                                ) : (
+                                  <Chip
+                                    label="Premium"
+                                    size="small"
+                                    sx={{ 
+                                      fontWeight: 600, 
+                                      ml: 1, 
+                                      bgcolor: theme.palette.warning.light,
+                                      color: theme.palette.warning.contrastText
+                                    }}
+                                  />
+                                )}
+                              </Box>
                             </Box>
                             
                             <Box sx={{ mb: 2, flexGrow: 1 }}>
                               <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                        <Typography variant="body2" color="text.secondary">
+                                <Typography variant="body2" color="text.secondary">
                                   Progress
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
                                   {series.completedTests || 0}/{series.totalTests || 10}
-                        </Typography>
-              </Box>
-                    <LinearProgress 
-                      variant="determinate" 
-                      value={((series.completedTests || 0) / (series.totalTests || 10)) * 100} 
-                      sx={{ 
-                        height: 8, 
-                        borderRadius: 4,
+                                </Typography>
+                              </Box>
+                              <LinearProgress 
+                                variant="determinate" 
+                                value={((series.completedTests || 0) / (series.totalTests || 10)) * 100} 
+                                sx={{ 
+                                  height: 8, 
+                                  borderRadius: 4,
                                 }}
                               />
                             </Box>
@@ -1112,6 +1277,12 @@ const Profile = () => {
                             {series.expiresAt && (
                               <Typography variant="caption" color="text.secondary" sx={{ mb: 2 }}>
                                 Expires: {new Date(series.expiresAt).toLocaleDateString()}
+                              </Typography>
+                            )}
+                            
+                            {series.subscribedAt && (
+                              <Typography variant="caption" color="text.secondary" sx={{ mb: 2 }}>
+                                Subscribed: {new Date(series.subscribedAt).toLocaleDateString()}
                               </Typography>
                             )}
                             
@@ -1207,13 +1378,10 @@ const Profile = () => {
                         <tbody>
                           {testHistory.map((test, index) => (
                             <tr key={index} style={{
-                              borderBottom: `1px solid ${theme.palette.divider}`,
-                              '&:last-child': {
-                                borderBottom: 'none',
-                              }
+                              borderBottom: index === testHistory.length - 1 ? 'none' : `1px solid ${theme.palette.divider}`
                             }}>
                               <td style={{ padding: '16px', fontWeight: 500 }}>
-                                {test.testName}
+                                {test.title}
                               </td>
                               <td style={{ padding: '16px', color: theme.palette.text.secondary }}>
                                 {test.subject}
@@ -1226,7 +1394,7 @@ const Profile = () => {
                                 />
                               </td>
                               <td style={{ padding: '16px', textAlign: 'right', color: theme.palette.text.secondary }}>
-                                {new Date(test.date).toLocaleDateString()}
+                                {new Date(test.completedAt).toLocaleDateString()}
                               </td>
                             </tr>
                           ))}

@@ -39,7 +39,7 @@ const COLORS = {
 };
 
 const TestReviewPage = () => {
-  const { testId, userId } = useParams();
+  const { testId, userId, attemptId } = useParams();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [testData, setTestData] = useState(null);
@@ -74,27 +74,85 @@ const TestReviewPage = () => {
         console.log('Test Data:', testResponse.data);
         setTestData(testResponse.data);
 
-        // Fetch the attempt data
-        const attemptResponse = await api.get(`/api/tests/${testId}/attempts/${userId || user.id}`);
-        if (!attemptResponse.data) {
-          throw new Error('Test attempt not found');
+        // Get the effective user ID - prefer URL param, fallback to Firebase ID
+        const effectiveUserId = userId || user?.firebaseId;
+        console.log('Current user:', user);
+        console.log('Using effectiveUserId:', effectiveUserId);
+        console.log('Attempt ID (if available):', attemptId);
+
+        if (!effectiveUserId && !attemptId) {
+          throw new Error('No valid user ID or attempt ID available');
+        }
+
+        // Try different approaches to fetch the attempt data
+        let attemptData = null;
+        let error = null;
+
+        // 1. First try using the attempt ID directly if available
+        if (attemptId && attemptId !== 'undefined') {
+          try {
+            console.log(`Trying to fetch attempt by ID: ${attemptId}`);
+            const attemptByIdResponse = await api.get(`/api/tests/${testId}/attempts-by-id/${attemptId}`);
+            if (attemptByIdResponse.data) {
+              console.log('Successfully fetched attempt by ID');
+              attemptData = attemptByIdResponse.data;
+            }
+          } catch (err) {
+            console.log('Error fetching by attempt ID:', err);
+            error = err;
+          }
+        }
+
+        // 2. If not found, try using user-attempt endpoint (most recent attempt)
+        if (!attemptData && effectiveUserId) {
+          try {
+            console.log(`Trying to fetch most recent attempt for user: ${effectiveUserId}`);
+            const userAttemptResponse = await api.get(`/api/tests/${testId}/user-attempt`);
+            if (userAttemptResponse.data) {
+              console.log('Successfully fetched most recent user attempt');
+              attemptData = userAttemptResponse.data;
+            }
+          } catch (err) {
+            console.log('Error fetching most recent user attempt:', err);
+            if (!error) error = err;
+          }
+        }
+
+        // 3. If still not found, try the user-attempts endpoint with effectiveUserId
+        if (!attemptData && effectiveUserId) {
+          try {
+            console.log(`Trying to fetch attempts for user ID: ${effectiveUserId}`);
+            const userAttemptsResponse = await api.get(`/api/tests/${testId}/user-attempts/${effectiveUserId}`);
+            if (userAttemptsResponse.data) {
+              console.log('Successfully fetched user attempt by ID');
+              attemptData = userAttemptsResponse.data;
+            }
+          } catch (err) {
+            console.log('Error fetching by user ID:', err);
+            if (!error) error = err;
+          }
+        }
+
+        // If we still don't have data, throw the last error
+        if (!attemptData) {
+          throw error || new Error('No test attempt found');
         }
         
         // Log the attempt data structure
-        console.log('Test Attempt Data:', attemptResponse.data);
+        console.log('Test Attempt Data:', attemptData);
         
         // Normalize the data structure - ensure answers is an array
         const normalizedAttempt = {
-          ...attemptResponse.data,
+          ...attemptData,
           // Check for different time properties
-          timeSpent: attemptResponse.data.timeSpent || 
-                     attemptResponse.data.duration || 
-                     attemptResponse.data.timeTaken || 
-                     attemptResponse.data.time || 0,
-          answers: Array.isArray(attemptResponse.data.answers) 
-            ? attemptResponse.data.answers 
-            : (typeof attemptResponse.data.answers === 'object' && attemptResponse.data.answers !== null)
-              ? Object.entries(attemptResponse.data.answers).map(([questionId, answer]) => ({
+          timeSpent: attemptData.timeSpent || 
+                     attemptData.duration || 
+                     attemptData.timeTaken || 
+                     attemptData.time || 0,
+          answers: Array.isArray(attemptData.answers) 
+            ? attemptData.answers 
+            : (typeof attemptData.answers === 'object' && attemptData.answers !== null)
+              ? Object.entries(attemptData.answers).map(([questionId, answer]) => ({
                   questionId,
                   selectedAnswer: answer
                 }))
@@ -121,7 +179,7 @@ const TestReviewPage = () => {
     if (testId) {
       fetchTestReview();
     }
-  }, [testId, userId, user]);
+  }, [testId, userId, user?.firebaseId, attemptId]);
 
   const handleExpandQuestion = (questionId) => {
     setExpandedQuestion(expandedQuestion === questionId ? null : questionId);
@@ -277,6 +335,7 @@ const TestReviewPage = () => {
 
   // Calculate statistics
   const totalQuestions = testData?.questions?.length || 0;
+  const totalMarks = testData?.questions?.reduce((sum, q) => sum + q.marks, 0) || 0;
   const attemptedQuestions = Array.isArray(testAttempt?.answers) ? testAttempt.answers.length : 0;
   const unattemptedQuestions = totalQuestions - attemptedQuestions;
   
@@ -290,8 +349,9 @@ const TestReviewPage = () => {
   // Incorrect answers are only counted for attempted questions
   const incorrectAnswers = attemptedQuestions - correctAnswers;
   
-  // Calculate score as percentage of correct answers out of total questions
-  const score = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
+  // Calculate obtained marks
+  const obtainedMarks = testAttempt?.score || 0;
+  const percentageScore = totalMarks > 0 ? Math.round((obtainedMarks / totalMarks) * 100) : 0;
 
   return (
     <Container maxWidth="lg">
@@ -318,7 +378,10 @@ const TestReviewPage = () => {
         >
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
             <IconButton 
-              onClick={() => navigate(`/test-results/${testId}/${userId || user.id}`)}
+              onClick={() => {
+                const effectiveUserId = userId || user?.firebaseId;
+                navigate(`/test-results/${testId}/${effectiveUserId}`);
+              }}
               sx={{ mr: 2 }}
             >
               <ArrowBackIcon />
@@ -356,9 +419,9 @@ const TestReviewPage = () => {
                 <Grid item xs={12} sm={6} md={3}>
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <Avatar sx={{ bgcolor: 'primary.main', mr: 1 }}>
-                      <Typography variant="body1">{score}%</Typography>
+                      <Typography variant="body1">{obtainedMarks}/{totalMarks}</Typography>
                     </Avatar>
-                    <Typography variant="subtitle1">Your Score</Typography>
+                    <Typography variant="subtitle1">Your Score ({percentageScore}%)</Typography>
                   </Box>
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
@@ -700,7 +763,10 @@ const TestReviewPage = () => {
           }}>
             <Button 
               variant="outlined" 
-              onClick={() => navigate(`/test-results/${testId}/${userId || user.id}`)}
+              onClick={() => {
+                const effectiveUserId = userId || user?.firebaseId;
+                navigate(`/test-results/${testId}/${effectiveUserId}`);
+              }}
               startIcon={<ArrowBackIcon />}
             >
               Back to Results

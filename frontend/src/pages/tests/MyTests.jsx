@@ -46,6 +46,7 @@ const MyTests = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [purchasedSeries, setPurchasedSeries] = useState([]);
+  const [subscribedSeries, setSubscribedSeries] = useState([]);
   const [testHistory, setTestHistory] = useState([]);
   const [testsInProgress, setTestsInProgress] = useState([]);
   const [activeTab, setActiveTab] = useState(0);
@@ -59,6 +60,9 @@ const MyTests = () => {
       try {
         // Fetch purchased test series
         await fetchPurchasedSeries();
+        
+        // Fetch subscribed test series
+        await fetchSubscribedSeries();
         
         // Fetch user test history (completed and in-progress tests)
         const statsResponse = await api.get(`/api/users/${user.firebaseId}/stats`);
@@ -126,8 +130,6 @@ const MyTests = () => {
 
   const fetchPurchasedSeries = async () => {
     try {
-      setLoading(true);
-      
       // Get user's purchased test series - this API may not be implemented yet
       try {
         const seriesResponse = await api.get('/api/users/purchases/test-series');
@@ -158,11 +160,8 @@ const MyTests = () => {
           setPurchasedTests([]);
         }
       }
-      
-      setLoading(false);
     } catch (error) {
       console.error('Error fetching purchased content:', error);
-      setLoading(false);
       toast('Purchases API not fully implemented yet. Some features may be limited.', {
         icon: '⚠️',
         style: {
@@ -174,6 +173,34 @@ const MyTests = () => {
     }
   };
 
+  const fetchSubscribedSeries = async () => {
+    try {
+      // Get user's subscribed test series
+      const subscribedResponse = await api.get('/api/test-series/user/subscribed');
+      
+      if (subscribedResponse.data && subscribedResponse.data.length > 0) {
+        setSubscribedSeries(subscribedResponse.data);
+      } else {
+        setSubscribedSeries([]);
+      }
+    } catch (error) {
+      console.warn('Subscriptions API not implemented yet:', error);
+      setSubscribedSeries([]);
+      
+      // Only show toast if there's an error other than API not existing yet
+      if (error.response && error.response.status !== 404) {
+        toast('Subscriptions API not fully implemented yet. Some features may be limited.', {
+          icon: '⚠️',
+          style: {
+            borderRadius: '10px',
+            background: '#FFF3CD',
+            color: '#856404',
+          },
+        });
+      }
+    }
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
@@ -181,6 +208,21 @@ const MyTests = () => {
       </Box>
     );
   }
+
+  // Check if user has any test series (purchased or subscribed)
+  const hasTestSeries = purchasedSeries.length > 0 || subscribedSeries.length > 0;
+
+  // Combine purchased and subscribed series for display
+  const allUserSeries = [
+    ...purchasedSeries.map(series => ({
+      ...series,
+      accessType: 'purchased'
+    })),
+    ...subscribedSeries.map(series => ({
+      ...series,
+      accessType: 'subscribed'
+    }))
+  ];
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
@@ -331,16 +373,16 @@ const MyTests = () => {
           variant="scrollable"
           scrollButtons="auto"
         >
-          <Tab label="Test Series" icon={<AssignmentIcon />} iconPosition="start" />
-          <Tab label="In Progress" icon={<PendingIcon />} iconPosition="start" />
-          <Tab label="Completed" icon={<CheckCircleIcon />} iconPosition="start" />
+          <Tab label="TEST SERIES" icon={<AssignmentIcon />} iconPosition="start" />
+          <Tab label="IN PROGRESS" icon={<PendingIcon />} iconPosition="start" />
+          <Tab label="COMPLETED" icon={<CheckCircleIcon />} iconPosition="start" />
         </Tabs>
       </Box>
 
-      {/* Purchased Test Series */}
+      {/* Purchased and Subscribed Test Series */}
       {activeTab === 0 && (
         <>
-          {purchasedSeries.length === 0 ? (
+          {!hasTestSeries ? (
             <Box 
               sx={{ 
                 py: 8, 
@@ -350,7 +392,7 @@ const MyTests = () => {
               }}
             >
               <Typography variant="h6" color="text.secondary" gutterBottom>
-                You haven't purchased any test series yet
+                You haven't purchased or subscribed to any test series yet
               </Typography>
               <Button 
                 variant="contained" 
@@ -363,86 +405,261 @@ const MyTests = () => {
             </Box>
           ) : (
             <Grid container spacing={3}>
-              {purchasedSeries.map((series, index) => (
-                <Grid item xs={12} sm={6} md={4} key={index}>
+              {allUserSeries.map((series, index) => (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
                   <Card 
                     elevation={0}
                     sx={{ 
                       height: '100%',
-                      borderRadius: 2,
+                      borderRadius: 2.5,
                       overflow: 'hidden',
-                      border: `1px solid ${theme.palette.divider}`,
-                      transition: 'all 0.3s ease',
+                      border: `1px solid ${series.accessType === 'purchased' 
+                        ? theme.palette.secondary.main 
+                        : theme.palette.info.main}`,
+                      transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                      position: 'relative',
+                      '&:before': {
+                        content: '""',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        backgroundImage: series.accessType === 'purchased'
+                          ? `linear-gradient(135deg, ${alpha(theme.palette.secondary.light, 0.05)}, ${alpha(theme.palette.secondary.dark, 0.05)})`
+                          : `linear-gradient(135deg, ${alpha(theme.palette.info.light, 0.05)}, ${alpha(theme.palette.info.dark, 0.05)})`,
+                        zIndex: 0
+                      },
                       '&:hover': { 
-                        boxShadow: `0 4px 12px ${alpha(theme.palette.primary.main, 0.2)}`,
-                        transform: 'translateY(-4px)'
+                        transform: 'translateY(-6px)',
+                        boxShadow: `0 12px 28px ${alpha(
+                          series.accessType === 'purchased' 
+                            ? theme.palette.secondary.main 
+                            : theme.palette.info.main, 0.25)}`,
+                      },
+                      '&:after': {
+                        content: '""',
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '3px',
+                        background: series.accessType === 'purchased'
+                          ? `linear-gradient(90deg, ${theme.palette.secondary.light}, ${theme.palette.secondary.dark})`
+                          : `linear-gradient(90deg, ${theme.palette.info.light}, ${theme.palette.info.dark})`,
+                        opacity: 0,
+                        transition: 'opacity 0.3s ease',
+                      },
+                      '&:hover:after': {
+                        opacity: 1
                       }
                     }}
                   >
                     <CardMedia
                       component="div"
                       sx={{
-                        height: 140,
-                        bgcolor: `${alpha(theme.palette.primary.main, 0.7)}`,
+                        height: 120,
+                        background: series.accessType === 'purchased' 
+                          ? `linear-gradient(135deg, ${theme.palette.secondary.dark}, ${theme.palette.secondary.main})` 
+                          : `linear-gradient(135deg, ${theme.palette.info.dark}, ${theme.palette.info.main})`,
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center'
+                        justifyContent: 'center',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        '&:after': {
+                          content: '""',
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          backgroundImage: 'url("https://www.transparenttextures.com/patterns/cubes.png")',
+                          opacity: 0.1,
+                          zIndex: 1
+                        }
                       }}
                     >
-                      <Typography variant="h5" component="div" color="white" fontWeight="bold">
+                      <Typography 
+                        variant="h6" 
+                        component="div" 
+                        color="white" 
+                        fontWeight="bold"
+                        sx={{ 
+                          zIndex: 2, 
+                          textShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                          px: 2,
+                          textAlign: 'center'
+                        }}
+                      >
                         {series.title}
                       </Typography>
+                      <Box 
+                        sx={{ 
+                          position: 'absolute', 
+                          top: 8, 
+                          right: 8, 
+                          zIndex: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 24,
+                          height: 24,
+                          borderRadius: '50%',
+                          background: 'rgba(255,255,255,0.2)',
+                          backdropFilter: 'blur(4px)'
+                        }}
+                      >
+                        {series.accessType === 'purchased' ? (
+                          <AssignmentTurnedInIcon sx={{ fontSize: 14, color: 'white' }} />
+                        ) : (
+                          <AccessTimeIcon sx={{ fontSize: 14, color: 'white' }} />
+                        )}
+                      </Box>
                     </CardMedia>
-                    <CardContent>
-                      <Box sx={{ mb: 2 }}>
+                    <CardContent sx={{ position: 'relative', zIndex: 2, p: 1.5, pt: 2 }}>
+                      <Box sx={{ mb: 1.5 }}>
                         <Chip 
                           label={series.category || 'General'} 
                           size="small" 
                           sx={{ 
                             bgcolor: alpha(theme.palette.primary.main, 0.1),
                             color: theme.palette.primary.main,
-                            fontWeight: 'medium'
+                            fontWeight: 'medium',
+                            px: 0.5,
+                            height: 22,
+                            fontSize: '0.7rem',
+                            borderRadius: 4,
+                            '& .MuiChip-label': {
+                              px: 1
+                            }
                           }} 
                         />
-                        <Box sx={{ display: 'flex', alignItems: 'center', mt: 2, gap: 0.5 }}>
-                          <AssignmentIcon fontSize="small" color="action" />
-                          <Typography variant="body2" color="text.secondary">
+                        <Box sx={{ display: 'flex', alignItems: 'center', mt: 1.5, gap: 0.5 }}>
+                          <AssignmentIcon fontSize="small" sx={{ fontSize: 16 }} color="action" />
+                          <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 500 }} color="text.secondary">
                             {series.totalTests || 0} Tests
                           </Typography>
                         </Box>
-                        <Box sx={{ display: 'flex', alignItems: 'center', mt: 1, gap: 0.5 }}>
-                          <AccessTimeIcon fontSize="small" color="action" />
-                          <Typography variant="body2" color="text.secondary">
+                        <Box sx={{ display: 'flex', alignItems: 'center', mt: 0.5, gap: 0.5 }}>
+                          <AccessTimeIcon fontSize="small" sx={{ fontSize: 16 }} color="action" />
+                          <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 500 }} color="text.secondary">
                             Valid until: {series.expiresAt ? formatDate(series.expiresAt) : 'No expiration'}
                           </Typography>
                         </Box>
                       </Box>
                       
-                      <Box sx={{ mt: 2 }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                          <Typography variant="body2">Progress</Typography>
-                          <Typography variant="body2" fontWeight="medium">
+                      <Box sx={{ mt: 1.5 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5, alignItems: 'center' }}>
+                          <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 600 }}>Progress</Typography>
+                          <Typography variant="body2" sx={{ fontSize: '0.8rem', fontWeight: 600 }} color={series.accessType === 'purchased' ? "secondary.main" : "info.main"}>
                             {series.progress?.completedTests || 0}/{series.totalTests || 0}
                           </Typography>
                         </Box>
-                        <LinearProgress 
-                          variant="determinate" 
-                          value={((series.progress?.completedTests || 0) / (series.totalTests || 1)) * 100}
+                        <Box sx={{ position: 'relative', mt: 0.5 }}>
+                          <Box 
+                            sx={{ 
+                              height: 6, 
+                              borderRadius: 3,
+                              width: '100%',
+                              bgcolor: alpha(
+                                series.accessType === 'purchased' 
+                                  ? theme.palette.secondary.main 
+                                  : theme.palette.info.main, 0.15),
+                              position: 'relative',
+                              overflow: 'hidden'
+                            }}
+                          >
+                            <Box 
+                              sx={{ 
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                height: '100%',
+                                width: `${((series.progress?.completedTests || 0) / (series.totalTests || 1)) * 100}%`,
+                                background: series.accessType === 'purchased'
+                                  ? `linear-gradient(90deg, ${theme.palette.secondary.light}, ${theme.palette.secondary.main})`
+                                  : `linear-gradient(90deg, ${theme.palette.info.light}, ${theme.palette.info.main})`,
+                                borderRadius: 3,
+                                transition: 'width 1s ease-in-out'
+                              }}
+                            />
+                          </Box>
+                        </Box>
+                      </Box>
+                      
+                      {/* Display badge for access type */}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 1.5 }}>
+                        <Chip 
+                          size="small"
+                          label={series.accessType === 'purchased' ? "Purchased" : "Subscribed"} 
+                          color={series.accessType === 'purchased' ? "secondary" : "info"}
                           sx={{ 
-                            height: 8, 
-                            borderRadius: 4,
-                            bgcolor: alpha(theme.palette.primary.main, 0.1)
+                            height: 22,
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            background: series.accessType === 'purchased'
+                              ? `linear-gradient(90deg, ${alpha(theme.palette.secondary.light, 0.8)}, ${alpha(theme.palette.secondary.main, 0.8)})`
+                              : `linear-gradient(90deg, ${alpha(theme.palette.info.light, 0.8)}, ${alpha(theme.palette.info.main, 0.8)})`,
+                            color: 'white',
+                            boxShadow: `0 2px 3px ${alpha(
+                              series.accessType === 'purchased' 
+                                ? theme.palette.secondary.main 
+                                : theme.palette.info.main, 0.3)}`,
+                            '& .MuiChip-label': {
+                              textShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                              px: 1
+                            }
                           }}
                         />
+                        <Typography 
+                          variant="caption" 
+                          color="text.secondary"
+                          sx={{ 
+                            display: 'flex', 
+                            alignItems: 'center', 
+                            gap: 0.5,
+                            fontSize: '0.7rem',
+                            fontWeight: 500
+                          }}
+                        >
+                          {series.progress?.averageScore ? (
+                            <>
+                              <BarChartIcon sx={{ fontSize: 12 }} />
+                              Avg. Score: {series.progress.averageScore}%
+                            </>
+                          ) : null}
+                        </Typography>
                       </Box>
                     </CardContent>
-                    <CardActions>
+                    <CardActions sx={{ px: 1.5, pb: 1.5, pt: 0, position: 'relative', zIndex: 2 }}>
                       <Button 
                         fullWidth 
                         variant="contained" 
-                        color="primary"
+                        color={series.accessType === 'purchased' ? "secondary" : "info"}
                         onClick={() => handleStartSeries(series._id)}
-                        startIcon={<PlayArrowIcon />}
+                        startIcon={<PlayArrowIcon sx={{ fontSize: 16 }} />}
+                        sx={{
+                          py: 0.5,
+                          fontWeight: 600,
+                          fontSize: '0.8rem',
+                          boxShadow: `0 2px 4px ${alpha(
+                            series.accessType === 'purchased' 
+                              ? theme.palette.secondary.main 
+                              : theme.palette.info.main, 0.3)}`,
+                          background: series.accessType === 'purchased'
+                            ? `linear-gradient(90deg, ${theme.palette.secondary.main}, ${theme.palette.secondary.dark})`
+                            : `linear-gradient(90deg, ${theme.palette.info.main}, ${theme.palette.info.dark})`,
+                          '&:hover': {
+                            background: series.accessType === 'purchased'
+                              ? `linear-gradient(90deg, ${theme.palette.secondary.dark}, ${theme.palette.secondary.main})`
+                              : `linear-gradient(90deg, ${theme.palette.info.dark}, ${theme.palette.info.main})`,
+                            boxShadow: `0 4px 8px ${alpha(
+                              series.accessType === 'purchased' 
+                                ? theme.palette.secondary.main 
+                                : theme.palette.info.main, 0.4)}`,
+                          }
+                        }}
                       >
                         Continue
                       </Button>

@@ -146,7 +146,7 @@ export const TestAttemptProvider = ({ children }) => {
                 try {
                   // Set a flag to track if we loaded saved time from progress
                   console.log('Loading saved progress after test data is available');
-                  savedTimeRestored = await loadSavedProgress(testId, testData);
+                  savedTimeRestored = await loadProgress(testId);
                 } catch (progressError) {
                   console.error('Error loading saved progress, but continuing:', progressError);
                   // Don't fail the whole operation if progress loading fails
@@ -227,162 +227,178 @@ export const TestAttemptProvider = ({ children }) => {
     return sectionQuestions[currentQuestion];
   };
 
-  // Load saved progress
-  const loadSavedProgress = async (testId, testData) => {
-    if (!user || progressLoaded) return false;
-
-    // Add loading lock to prevent race conditions
-    if (window._loadingProgress) {
-      console.warn('Progress load already in progress, skipping');
-      return false;
-    }
+  // Load progress function with proper response handling
+  const loadProgress = async (testId) => {
     window._loadingProgress = true;
-
     try {
-      const userId = user.firebaseId || user.uid || (typeof user === 'string' ? user : null);
-      if (!userId) {
-        console.error('No valid user ID found for API call');
+      console.log(`Loading progress for test ${testId}...`);
+      
+      // Check if test data is available
+      if (!test) {
+        console.warn('Test data not loaded yet');
         return false;
       }
       
-      const currentTest = testData || test;
-      if (!currentTest?.questions?.length) {
-        console.warn('Cannot load progress: test data is not available');
-        return false;
-      }
-
-      const validQuestionIds = new Set(currentTest.questions.map(q => q._id).filter(Boolean));
-      if (!validQuestionIds.size) {
-        console.warn('No valid question IDs found in test data');
-        return false;
-      }
-
-      console.log(`Loading progress for test ${testId} with ${validQuestionIds.size} valid questions`);
-
-      // Create axios instance with retry logic
-      const silentAxios = axios.create({
-        baseURL: api.defaults.baseURL,
-        headers: api.defaults.headers,
-        timeout: 10000 // 10 second timeout
-      });
-
-      // Add retry interceptor
-      silentAxios.interceptors.response.use(null, async (error) => {
-        if (error.response?.status === 404) {
-          return { status: 404, data: null };
-        }
-        
-        const config = error.config;
-        config.retryCount = config.retryCount || 0;
-        
-        if (config.retryCount < 2 && error.response?.status >= 500) {
-          config.retryCount++;
-          await new Promise(resolve => setTimeout(resolve, 1000 * config.retryCount));
-          return silentAxios(config);
-        }
-        return Promise.reject(error);
-      });
-
-      // Add auth interceptor
-      silentAxios.interceptors.request.use(async (config) => {
-        try {
-          const user = auth.currentUser;
-          if (user) {
-            const token = await user.getIdToken(true); // Force refresh token
-            config.headers.Authorization = `Bearer ${token}`;
-          }
-        } catch (e) {
-          console.warn('Auth error in progress load:', e);
-        }
-        return config;
-      });
+      // Build valid question IDs set for filtering
+      const validQuestionIds = new Set(test.questions.map(q => q._id).filter(Boolean));
       
-      const response = await silentAxios.get(`/api/tests/${testId}/progress/${userId}`);
-        
-      if (response.status === 404) {
-        console.log(`No saved progress found for test ${testId}`);
-        return false;
-      }
-        
-      if (!response.data) {
-        console.warn('Invalid progress data received');
-        return false;
-      }
-
-      let timerRestored = false;
-        
-      // Validate and restore timer
-      if (typeof response.data.timeLeft === 'number' && response.data.timeLeft > 0) {
-        console.log(`Restoring timer: ${response.data.timeLeft}s`);
-        const maxAllowedTime = currentTest.duration ? currentTest.duration * 60 : Infinity;
-        const newTime = Math.min(response.data.timeLeft, maxAllowedTime);
-        
-        if (newTime !== response.data.timeLeft) {
-          console.warn(`Adjusted time from ${response.data.timeLeft}s to ${newTime}s`);
-        }
-        
-        setTimeLeft(newTime);
-        timerRestored = true;
-      }
-
-      // Initialize question status for all questions
+      // Initialize status object for all questions as NOT_VISITED
       const initialStatus = {};
-      currentTest.questions.forEach(question => {
+      test.questions.forEach(question => {
         if (question && question._id) {
           initialStatus[question._id] = STATUS.NOT_VISITED;
         }
       });
       
-      // Validate and restore answers
-      if (response.data.answers && typeof response.data.answers === 'object') {
-        const validAnswers = {};
-        let invalidCount = 0;
-        
-        Object.entries(response.data.answers).forEach(([qId, answer]) => {
-          if (validQuestionIds.has(qId) && answer !== null && answer !== undefined) {
-            validAnswers[qId] = answer;
-            // Update status for answered questions
-            initialStatus[qId] = STATUS.ANSWERED;
-          } else {
-            invalidCount++;
-          }
-        });
-
-        if (invalidCount > 0) {
-          console.warn(`Filtered out ${invalidCount} invalid answers`);
-        }
-
-        // Set answers first
-        if (Object.keys(validAnswers).length > 0) {
-          setAnswers(validAnswers);
-          console.log(`Restored ${Object.keys(validAnswers).length} valid answers`);
-        }
-      }
-
-      // Restore marked for review status if available
-      if (response.data.markedForReview && Array.isArray(response.data.markedForReview)) {
-        response.data.markedForReview.forEach(qId => {
-          if (validQuestionIds.has(qId)) {
-            initialStatus[qId] = STATUS.MARKED_FOR_REVIEW;
-          }
-        });
-      }
-
-      // Set visited status for questions that were viewed but not answered
-      if (response.data.visited && Array.isArray(response.data.visited)) {
-        response.data.visited.forEach(qId => {
-          if (validQuestionIds.has(qId) && initialStatus[qId] === STATUS.NOT_VISITED) {
-            initialStatus[qId] = STATUS.VISITED;
-          }
-        });
-      }
-
-      // Set the question status after all updates
-      setQuestionStatus(initialStatus);
-      console.log('Question status restored:', initialStatus);
+      let timerRestored = false;
       
-      setProgressLoaded(true);
-      return timerRestored;
+      // First try to load from API
+      try {
+        const response = await api.get(`/api/tests/${testId}/progress`);
+        
+        if (!response.data) {
+          console.warn('No progress data returned from API');
+          throw new Error('No progress data');
+        }
+        
+        // Only restore time if it's valid
+        if (response.data.timeLeft && typeof response.data.timeLeft === 'number' && response.data.timeLeft > 0) {
+          setTimeLeft(response.data.timeLeft);
+          console.log(`Restored time left: ${response.data.timeLeft} seconds`);
+          timerRestored = true;
+        } else if (test.duration) {
+          // Set to full duration if no time is stored
+          const fullDuration = test.duration * 60; // convert minutes to seconds
+          setTimeLeft(fullDuration);
+          console.log(`Setting timer to full duration: ${fullDuration} seconds`);
+        }
+        
+        // Restore answers from the saved progress
+        if (response.data.answers && typeof response.data.answers === 'object') {
+          const validAnswers = {};
+          let invalidCount = 0;
+          
+          Object.entries(response.data.answers).forEach(([qId, answer]) => {
+            if (validQuestionIds.has(qId) && answer !== null && answer !== undefined) {
+              validAnswers[qId] = answer;
+              // Update status for answered questions
+              initialStatus[qId] = STATUS.ANSWERED;
+            } else {
+              invalidCount++;
+            }
+          });
+          
+          if (invalidCount > 0) {
+            console.warn(`Filtered out ${invalidCount} invalid answers`);
+          }
+          
+          // Set answers first
+          if (Object.keys(validAnswers).length > 0) {
+            setAnswers(validAnswers);
+            console.log(`Restored ${Object.keys(validAnswers).length} valid answers`);
+          }
+        }
+        
+        // Restore marked for review status if available
+        if (response.data.markedForReview && Array.isArray(response.data.markedForReview)) {
+          response.data.markedForReview.forEach(qId => {
+            if (validQuestionIds.has(qId)) {
+              initialStatus[qId] = STATUS.MARKED_FOR_REVIEW;
+            }
+          });
+        }
+        
+        // Set visited status for questions that were viewed but not answered
+        if (response.data.visited && Array.isArray(response.data.visited)) {
+          response.data.visited.forEach(qId => {
+            if (validQuestionIds.has(qId) && initialStatus[qId] === STATUS.NOT_VISITED) {
+              initialStatus[qId] = STATUS.VISITED;
+            }
+          });
+        }
+        
+        // Set the question status after all updates
+        setQuestionStatus(initialStatus);
+        console.log('Question status restored:', initialStatus);
+        
+        setProgressLoaded(true);
+        return timerRestored;
+      } catch (apiError) {
+        console.error('API error loading progress:', apiError);
+        
+        // Fall back to localStorage if API fails
+        console.log('Attempting to load progress from localStorage...');
+        const localData = loadProgressFromLocalStorage(testId);
+        
+        if (localData) {
+          console.log('Using progress from localStorage');
+          
+          // Restore timeLeft from localStorage
+          if (typeof localData.timeLeft === 'number' && localData.timeLeft > 0) {
+            setTimeLeft(localData.timeLeft);
+            console.log(`Restored time left from localStorage: ${localData.timeLeft} seconds`);
+            timerRestored = true;
+          } else if (test.duration) {
+            // Set to full duration if no time is stored
+            const fullDuration = test.duration * 60; // convert minutes to seconds
+            setTimeLeft(fullDuration);
+            console.log(`Setting timer to full duration: ${fullDuration} seconds`);
+          }
+          
+          // Process answers from localStorage
+          if (localData.answers && typeof localData.answers === 'object') {
+            const validAnswers = {};
+            
+            Object.entries(localData.answers).forEach(([qId, answer]) => {
+              if (validQuestionIds.has(qId) && answer !== null && answer !== undefined) {
+                validAnswers[qId] = answer;
+                initialStatus[qId] = STATUS.ANSWERED;
+              }
+            });
+            
+            if (Object.keys(validAnswers).length > 0) {
+              setAnswers(validAnswers);
+              console.log(`Restored ${Object.keys(validAnswers).length} answers from localStorage`);
+            }
+          }
+          
+          // Restore markedForReview
+          if (localData.markedForReview && Array.isArray(localData.markedForReview)) {
+            localData.markedForReview.forEach(qId => {
+              if (validQuestionIds.has(qId)) {
+                initialStatus[qId] = STATUS.MARKED_FOR_REVIEW;
+              }
+            });
+          }
+          
+          // Restore visited
+          if (localData.visited && Array.isArray(localData.visited)) {
+            localData.visited.forEach(qId => {
+              if (validQuestionIds.has(qId) && initialStatus[qId] === STATUS.NOT_VISITED) {
+                initialStatus[qId] = STATUS.VISITED;
+              }
+            });
+          }
+          
+          // Set the question status
+          setQuestionStatus(initialStatus);
+          setProgressLoaded(true);
+          
+          return timerRestored;
+        }
+        
+        // If no localStorage data either, initialize with defaults
+        if (test.duration) {
+          const fullDuration = test.duration * 60; // convert minutes to seconds
+          setTimeLeft(fullDuration);
+          console.log(`Setting timer to full duration: ${fullDuration} seconds`);
+        }
+        
+        // Set the question status to all NOT_VISITED
+        setQuestionStatus(initialStatus);
+        setProgressLoaded(true);
+        return false;
+      }
     } catch (error) {
       console.error('Error loading progress:', error);
       if (error.response) {
@@ -395,6 +411,49 @@ export const TestAttemptProvider = ({ children }) => {
       return false;
     } finally {
       window._loadingProgress = false;
+    }
+  };
+
+  // Add function to save progress to localStorage as fallback
+  const saveProgressToLocalStorage = (testId, progressData) => {
+    try {
+      const storageKey = `test_progress_${testId}`;
+      localStorage.setItem(storageKey, JSON.stringify({
+        ...progressData,
+        timestamp: new Date().toISOString()
+      }));
+      console.log('Progress saved to localStorage as fallback');
+      return true;
+    } catch (error) {
+      console.error('Error saving to localStorage:', error);
+      return false;
+    }
+  };
+
+  // Add function to load progress from localStorage
+  const loadProgressFromLocalStorage = (testId) => {
+    try {
+      const storageKey = `test_progress_${testId}`;
+      const savedData = localStorage.getItem(storageKey);
+      if (!savedData) return null;
+      
+      const parsedData = JSON.parse(savedData);
+      
+      // Check if the data is not too old (within 24 hours)
+      const timestamp = new Date(parsedData.timestamp);
+      const now = new Date();
+      const hoursDiff = (now - timestamp) / (1000 * 60 * 60);
+      
+      if (hoursDiff > 24) {
+        console.log('Local storage data is too old, not using');
+        localStorage.removeItem(storageKey);
+        return null;
+      }
+      
+      return parsedData;
+    } catch (error) {
+      console.error('Error loading from localStorage:', error);
+      return null;
     }
   };
 
@@ -411,58 +470,100 @@ export const TestAttemptProvider = ({ children }) => {
       return false;
     }
     
-    try {
-      // Get valid question IDs from the test
-      const validQuestionIds = test.questions.map(q => q._id).filter(Boolean);
-      
-      // Filter answers to only include valid questions from this test
-      const validAnswers = {};
-      let validAnswerCount = 0;
-      
-      // Collect marked for review questions
-      const markedForReview = [];
-      // Collect visited questions
-      const visited = [];
-      
-      Object.entries(questionStatus).forEach(([qId, status]) => {
-        if (validQuestionIds.includes(qId)) {
-          if (status === STATUS.MARKED_FOR_REVIEW) {
-            markedForReview.push(qId);
-          } else if (status === STATUS.VISITED) {
-            visited.push(qId);
+    // Implement retry logic
+    let attempts = 0;
+    const maxAttempts = 3;
+    let lastError = null;
+    
+    while (attempts < maxAttempts) {
+      try {
+        // Check if test data is available
+        if (!test || !test.questions) {
+          console.warn('Test data not available yet, deferring save');
+          return false;
+        }
+        
+        // Get valid question IDs from the test
+        const validQuestionIds = test.questions.map(q => q._id).filter(Boolean);
+        
+        // Filter answers to only include valid questions from this test
+        const validAnswers = {};
+        let validAnswerCount = 0;
+        
+        // Collect marked for review questions
+        const markedForReview = [];
+        // Collect visited questions
+        const visited = [];
+        
+        Object.entries(questionStatus).forEach(([qId, status]) => {
+          if (validQuestionIds.includes(qId)) {
+            if (status === STATUS.MARKED_FOR_REVIEW) {
+              markedForReview.push(qId);
+            } else if (status === STATUS.VISITED) {
+              visited.push(qId);
+            }
+          }
+        });
+        
+        for (const [qId, answer] of Object.entries(answers)) {
+          if (!validQuestionIds.includes(qId)) continue;
+          
+          if (answer !== undefined && answer !== null && answer !== '') {
+            validAnswers[qId] = answer;
+            validAnswerCount++;
           }
         }
-      });
-      
-      for (const [qId, answer] of Object.entries(answers)) {
-        if (!validQuestionIds.includes(qId)) continue;
         
-        if (answer !== undefined && answer !== null && answer !== '') {
-          validAnswers[qId] = answer;
-          validAnswerCount++;
+        console.log(`Saving progress with ${validAnswerCount} answers, ${markedForReview.length} marked, ${visited.length} visited`);
+        
+        // Create minimal but valid payload
+        const payload = {
+          answers: validAnswers || {}, // Ensure we always send an object even if empty
+          timeLeft: timeLeft || 0,     // Ensure timeLeft is always a number
+          markedForReview: markedForReview || [],
+          visited: visited || []
+        };
+        
+        // Save to localStorage as a fallback
+        saveProgressToLocalStorage(id, payload);
+        
+        // Check if we're in development mode and use the dev endpoint
+        const isDevelopment = process.env.NODE_ENV === 'development';
+        const endpoint = isDevelopment 
+          ? `/api/tests/${id}/dev-save-progress` 
+          : `/api/tests/${id}/save-progress`;
+        
+        console.log(`Using ${isDevelopment ? 'development' : 'production'} endpoint: ${endpoint}`);
+        
+        // Use specific timeout for this request
+        const response = await api.post(endpoint, payload, {
+          timeout: 10000 // 10 second timeout
+        });
+        
+        if (response.data) {
+          console.log('Progress saved successfully');
+          return true;
+        }
+        
+        // If we got here without a response, treat as error
+        throw new Error('No response data returned');
+      } catch (error) {
+        attempts++;
+        lastError = error;
+        console.error(`Error saving progress (attempt ${attempts}/${maxAttempts}):`, error);
+        
+        if (attempts < maxAttempts) {
+          // Add exponential backoff delay
+          const delay = Math.pow(2, attempts) * 1000;
+          console.log(`Retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
         }
       }
-      
-      console.log(`Saving progress with ${validAnswerCount} answers, ${markedForReview.length} marked, ${visited.length} visited`);
-      
-      // Create payload with all progress information
-      const payload = {
-        answers: validAnswers,
-        timeLeft,
-        markedForReview,
-        visited
-      };
-      
-      const response = await api.post(`/api/tests/${id}/save-progress`, payload);
-      
-      if (response.data) {
-        console.log('Progress saved successfully');
-        return true;
-      }
-    } catch (error) {
-      console.error('Error saving progress:', error);
-      return false;
     }
+    
+    console.error('All save attempts failed:', lastError);
+    // At this point, we've already saved to localStorage so there's still a fallback
+    return false;
   };
 
   // Handle answer change
@@ -631,9 +732,8 @@ export const TestAttemptProvider = ({ children }) => {
         localStorage.removeItem(`test_${currentTestId}_answers`);
         localStorage.removeItem(`test_${currentTestId}_startTime`);
         
-        // Redirect to results page using the correct route format
-        const userId = user.uid;
-        window.location.href = `/test-results/${currentTestId}/${userId}`;
+        // Redirect to results page using the correct route format with attemptId
+        window.location.href = `/test-results/${currentTestId}/attempt/${attemptIdFromResponse}`;
       } else {
         console.error('No attempt ID received in response');
         toast.error('Error accessing results. Redirecting to tests page...');
@@ -653,17 +753,39 @@ export const TestAttemptProvider = ({ children }) => {
         
         if (status === 409) {
           // Test already submitted
-          setHasBeenSubmitted(true);
-          toast.info('This test was already submitted');
+          toast.dismiss(loadingToast);
+          toast.success('This test was already submitted');
           
-          // Try to redirect to results
-          const attemptId = error.response.data?.attempt?.id || 
-                          localStorage.getItem(`test_${currentTestId}_attempt_id`);
+          // Try to get attempt ID from the response
+          const attemptId = error.response.data?.attempt?.id;
           
           if (attemptId) {
-            window.location.href = `/tests-results/${currentTestId}/${attemptId}`;
-            return;
+            console.log(`Test was already submitted with attempt ID: ${attemptId}`);
+            
+            try {
+              // Store the attempt ID
+              localStorage.setItem(`test_${currentTestId}_attempt_id`, attemptId);
+              
+              // Redirect to results page using attemptId instead of userId
+              setTimeout(() => {
+                window.location.href = `/test-results/${currentTestId}/attempt/${attemptId}`;
+              }, 1500);
+            } catch (navError) {
+              console.error('Navigation error after 409:', navError);
+              // Fallback to tests page if navigation fails
+              setTimeout(() => {
+                window.location.href = '/tests';
+              }, 1500);
+            }
+          } else {
+            // No attempt ID found, redirect to tests page
+            console.log('No attempt ID found in 409 response, redirecting to tests page');
+            setTimeout(() => {
+              window.location.href = '/tests';
+            }, 1500);
           }
+          
+          return error.response.data;
         } else if (status === 401 || status === 403) {
           setSubmitError('Not authorized to submit this test');
           toast.error('Please login again to submit the test');
@@ -903,7 +1025,8 @@ export const TestAttemptProvider = ({ children }) => {
         if (error.response?.status === 409) {
           // Test already submitted
           toast.dismiss(loadingToast);
-          toast.info('This test was already submitted');
+          toast.success('This test was already submitted');
+          setHasBeenSubmitted(true);
           return error.response.data;
         }
         
@@ -950,12 +1073,29 @@ export const TestAttemptProvider = ({ children }) => {
     }
   }, [currentTestId, user?.firebaseId]);
 
+  // Add a delayed initial save to ensure test data is fully loaded
+  useEffect(() => {
+    if (currentTestId && user && test?.questions?.length > 0) {
+      // Delay the first save by 3 seconds to ensure everything is initialized
+      const initialSaveTimer = setTimeout(() => {
+        console.log('Performing delayed initial progress save...');
+        saveAnswers(currentTestId).catch(err => {
+          console.warn('Initial save failed, will retry with regular timer:', err);
+        });
+      }, 3000);
+      
+      return () => clearTimeout(initialSaveTimer);
+    }
+  }, [currentTestId, user, test]);
+
   // Set up periodic saving of answers
   useEffect(() => {
-    if (currentTestId && user && Object.keys(answers).length > 0) {
+    if (currentTestId && user && test?.questions?.length > 0) {
       // Save answers every 30 seconds
       saveTimerRef.current = setInterval(() => {
-        saveAnswers(currentTestId);
+        saveAnswers(currentTestId).catch(err => {
+          console.warn('Periodic save failed:', err);
+        });
       }, 30000);
       
       return () => {
@@ -965,7 +1105,7 @@ export const TestAttemptProvider = ({ children }) => {
         }
       };
     }
-  }, [currentTestId, answers, user]);
+  }, [currentTestId, test, user]);
   
   // Save progress when timer changes significantly (every minute)
   useEffect(() => {

@@ -211,7 +211,7 @@ const TestSeriesLeaderboardPage = () => {
                 {testSeries.title}
               </Typography>
               <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-                {testSeries.subject || testSeries.category}
+                {testSeries.category}
               </Typography>
               <Box sx={{ display: 'flex', mt: 1 }}>
                 <Chip 

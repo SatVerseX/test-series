@@ -141,6 +141,26 @@ const userSchema = new mongoose.Schema({
       averageScore: { type: Number, default: 0 }
     }
   }],
+  // Subscribed free test series
+  subscribedSeries: [{
+    seriesId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'TestSeries'
+    },
+    subscribedAt: {
+      type: Date,
+      default: Date.now
+    },
+    progress: { type: Number, default: 0 },
+    testsCompleted: [{ 
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Test'
+    }],
+    lastActivityAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   // Purchased individual tests
   purchasedTests: [{
     testId: {

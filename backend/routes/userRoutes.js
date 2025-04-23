@@ -5,6 +5,7 @@ const Test = require('../models/Test');
 const { verifyToken, isAdmin } = require('../middleware/auth');
 const admin = require('firebase-admin');
 const TestAttempt = require('../models/TestAttempt');
+const TestSeries = require('../models/TestSeries');
 
 // Register new user (no token verification required)
 router.post('/register', async (req, res) => {
@@ -290,30 +291,46 @@ router.get('/:id/stats', verifyToken, async (req, res) => {
     // Calculate stats
     const testsTaken = testAttempts.length;
     const completedTests = testAttempts.filter(attempt => attempt.status === 'completed');
+    
+    // Calculate average score as a percentage (score/totalMarks * 100)
     const averageScore = completedTests.length > 0 
-      ? completedTests.reduce((sum, attempt) => sum + (attempt.score || 0), 0) / completedTests.length 
+      ? completedTests.reduce((sum, attempt) => {
+          // Calculate percentage score for this attempt
+          const scorePercentage = attempt.totalMarks && attempt.totalMarks > 0
+            ? (attempt.score / attempt.totalMarks) * 100
+            : attempt.score || 0; // Fallback to raw score if totalMarks is missing
+          return sum + scorePercentage;
+        }, 0) / completedTests.length 
       : 0;
     
     // Calculate total time spent on tests (in minutes)
-    const totalTime = 0; // This would require tracking start and end times
+    const totalTime = completedTests.reduce((sum, attempt) => {
+      return sum + (attempt.timeTaken || 0); 
+    }, 0);
     
     // Format the recently completed tests
     const recentTests = testAttempts.map(attempt => {
       // Get passing threshold from the test, default to 50%
       const passingThreshold = attempt.testId?.passingScore || 50;
       
-      // Determine if test was passed based on score >= passing threshold
-      // This overrides the stored passed value
+      // Calculate percentage score for this attempt
+      const scorePercentage = attempt.totalMarks && attempt.totalMarks > 0
+        ? Math.round((attempt.score / attempt.totalMarks) * 100)
+        : attempt.score || 0; // Fallback to raw score if totalMarks is missing
+      
+      // Determine if test was passed based on percentage score >= passing threshold
       const hasPassed = attempt.status === 'completed' && 
-                        typeof attempt.score === 'number' && 
-                        attempt.score >= passingThreshold;
+                        typeof scorePercentage === 'number' && 
+                        scorePercentage >= passingThreshold;
       
       return {
         id: attempt._id,
         testId: attempt.testId?._id,
         title: attempt.testId?.title || 'Unknown Test',
         subject: attempt.testId?.subject || 'N/A',
-        score: attempt.score || 0,
+        scoreRaw: attempt.score || 0,
+        totalMarks: attempt.totalMarks || 0,
+        score: scorePercentage, // Return percentage score
         passed: hasPassed,  // Use calculated value
         completedAt: attempt.completedAt,
         status: attempt.status,
@@ -324,7 +341,7 @@ router.get('/:id/stats', verifyToken, async (req, res) => {
 
     res.json({
       testsTaken,
-      averageScore: Math.round(averageScore * 10) / 10, // Round to 1 decimal place
+      averageScore: Math.round(averageScore), // Round to whole number percentage
       totalTime,
       recentTests
     });
@@ -828,6 +845,179 @@ router.get('/purchases/:type', verifyToken, async (req, res) => {
   } catch (err) {
     console.error(`Error fetching user purchased ${req.params.type}:`, err);
     res.status(500).json({ error: `Failed to fetch purchased ${req.params.type}` });
+  }
+});
+
+// Subscribe to a free test series
+router.post('/subscribe/test-series/:seriesId', verifyToken, async (req, res) => {
+  try {
+    const { seriesId } = req.params;
+    const userId = req.user.firebaseId;
+    
+    // Check if the user exists
+    const user = await User.findOne({ firebaseId: userId });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if user is already subscribed to this series
+    if (!user.subscribedSeries) {
+      user.subscribedSeries = [];
+    }
+    
+    const isAlreadySubscribed = user.subscribedSeries.some(
+      sub => sub.seriesId.toString() === seriesId
+    );
+    
+    if (isAlreadySubscribed) {
+      return res.status(409).json({ 
+        message: 'Already subscribed', 
+        isSubscribed: true 
+      });
+    }
+    
+    // Add the series to the user's subscriptions
+    user.subscribedSeries.push({
+      seriesId,
+      subscribedAt: new Date(),
+      progress: 0
+    });
+    
+    await user.save();
+    
+    res.status(200).json({ 
+      message: 'Successfully subscribed to test series',
+      isSubscribed: true
+    });
+  } catch (error) {
+    console.error('Error subscribing to test series:', error);
+    res.status(500).json({ error: 'Failed to subscribe to test series' });
+  }
+});
+
+// Check if user is subscribed to a test series
+router.get('/subscribed/test-series/:seriesId', verifyToken, async (req, res) => {
+  try {
+    const { seriesId } = req.params;
+    const userId = req.user.firebaseId;
+    
+    // Check if the user exists
+    const user = await User.findOne({ firebaseId: userId });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if user is subscribed to this series
+    const isSubscribed = user.subscribedSeries && user.subscribedSeries.some(
+      sub => sub.seriesId.toString() === seriesId
+    );
+    
+    res.status(200).json({ isSubscribed });
+  } catch (error) {
+    console.error('Error checking subscription status:', error);
+    res.status(500).json({ error: 'Failed to check subscription status' });
+  }
+});
+
+// Get all subscribed series for the user
+router.get('/subscribed/test-series', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.firebaseId;
+    
+    // Check if the user exists
+    const user = await User.findOne({ firebaseId: userId })
+      .populate({
+        path: 'subscribedSeries.seriesId',
+        select: 'title description subject category totalTests'
+      });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Format subscribed series data
+    const subscribedSeries = (user.subscribedSeries || [])
+      .filter(item => item.seriesId) // Filter out any with missing series (might have been deleted)
+      .map(item => {
+        const series = item.seriesId;
+        return {
+          _id: series._id,
+          title: series.title,
+          description: series.description,
+          category: series.category,
+          subject: series.subject,
+          totalTests: series.totalTests || 0,
+          subscribedAt: item.subscribedAt,
+          progress: item.progress || 0
+        };
+      });
+    
+    res.status(200).json(subscribedSeries);
+  } catch (error) {
+    console.error('Error fetching subscribed series:', error);
+    res.status(500).json({ error: 'Failed to fetch subscribed series' });
+  }
+});
+
+// Update user's progress in a test series
+router.put('/test-series/:seriesId/progress', verifyToken, async (req, res) => {
+  try {
+    const { seriesId } = req.params;
+    const { testIds } = req.body;
+    const userId = req.user.firebaseId;
+    
+    // Validate input
+    if (!Array.isArray(testIds)) {
+      return res.status(400).json({ error: 'testIds must be an array of test IDs' });
+    }
+    
+    // Find the user
+    const user = await User.findOne({ firebaseId: userId });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Find user's subscription to this series
+    const seriesSubscription = user.subscribedSeries?.find(
+      sub => sub.seriesId.toString() === seriesId
+    );
+    
+    if (!seriesSubscription) {
+      return res.status(404).json({ 
+        error: 'User is not subscribed to this test series' 
+      });
+    }
+    
+    // Get series to calculate progress
+    const series = await TestSeries.findById(seriesId);
+    if (!series) {
+      return res.status(404).json({ error: 'Test series not found' });
+    }
+    
+    // Update completed tests
+    seriesSubscription.testsCompleted = testIds;
+    
+    // Calculate progress percentage
+    if (series.totalTests > 0) {
+      seriesSubscription.progress = Math.round((testIds.length / series.totalTests) * 100);
+    } else {
+      seriesSubscription.progress = 0;
+    }
+    
+    // Update lastActivityAt
+    seriesSubscription.lastActivityAt = new Date();
+    
+    // Save user
+    await user.save();
+    
+    res.status(200).json({
+      message: 'Test series progress updated successfully',
+      progress: seriesSubscription.progress,
+      testsCompleted: seriesSubscription.testsCompleted.length
+    });
+  } catch (error) {
+    console.error('Error updating test series progress:', error);
+    res.status(500).json({ error: 'Failed to update test series progress' });
   }
 });
 

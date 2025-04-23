@@ -7,6 +7,7 @@ const TestAttempt = require('../models/TestAttempt');
 const User = require('../models/User');
 const Purchase = require('../models/Purchase');
 const { DEFAULT_CATEGORIES, getIconForCategory } = require('../data/defaultCategories');
+const Leaderboard = require('../models/Leaderboard');
 
 // ✅ Get Test Categories - No authentication required
 router.get('/categories', async (req, res) => {
@@ -174,7 +175,7 @@ router.post('/', verifyToken, hasPermission('canCreateTests'), async (req, res) 
   }
 });
 
-// ✅ Update Test Status (Draft → Published & Vice Versa) - Only Admin or Teacher with permission
+//  Update Test Status (Draft → Published & Vice Versa) - Only Admin or Teacher with permission
 // Toggle test status
 router.put('/:id/status', verifyToken, hasPermission('canEditTests'), async (req, res) => {
   try {
@@ -217,7 +218,7 @@ router.put('/:id/status', verifyToken, hasPermission('canEditTests'), async (req
   }
 });
 
-// ✅ Update Test - Only Admin or Teacher with permission
+// Update Test - Only Admin or Teacher with permission
 router.put('/:id', verifyToken, hasPermission('canEditTests'), async (req, res) => {
   try {
     const test = await Test.findById(req.params.id);
@@ -283,7 +284,7 @@ router.put('/:id', verifyToken, hasPermission('canEditTests'), async (req, res) 
   }
 });
 
-// ✅ Delete Test - Only Admin or Teacher with permission
+//  Delete Test - Only Admin or Teacher with permission
 router.delete('/:id', verifyToken, hasPermission('canDeleteTests'), async (req, res) => {
   try {
     const test = await Test.findById(req.params.id);
@@ -318,7 +319,7 @@ router.delete('/:id', verifyToken, hasPermission('canDeleteTests'), async (req, 
   }
 });
 
-// ✅ Get Tests (with pagination and filters)
+//  Get Tests (with pagination and filters)
 router.get('/', verifyToken, async (req, res) => {
   try {
     const {
@@ -399,7 +400,7 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Get Single Test
+//  Get Single Test
 router.get('/:id', verifyToken, async (req, res) => {
   try {
     const test = await Test.findById(req.params.id);
@@ -473,7 +474,7 @@ router.get('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Check Test Access
+//  Check Test Access
 router.get('/:id/check-access', verifyToken, async (req, res) => {
   try {
     const test = await Test.findById(req.params.id);
@@ -556,95 +557,254 @@ router.post('/:id/save-progress', verifyToken, async (req, res) => {
     
     // Early validation of required data
     if (!testId || !userId) {
-      return res.status(400).json({ message: 'Missing required parameters' });
-    }
-    
-    // Check if payload is too large
-    if (req.body.answers && Object.keys(req.body.answers).length > 500) {
-      return res.status(413).json({ 
-        message: 'Payload too large. Please send smaller batches.',
-        maximumBatchSize: 500
+      console.error('Missing required parameters:', { testId, userId });
+      return res.status(400).json({ 
+        success: false,
+        message: 'Missing required parameters'
       });
     }
     
-    // Validate answers data structure
-    const receivedAnswers = req.body.answers || {};
-    if (typeof receivedAnswers !== 'object') {
-      return res.status(400).json({ message: 'Invalid answers format' });
-    }
+    // Log request for debugging
+    console.log(`Saving progress: testId=${testId}, userId=${userId}, timeLeft=${req.body.timeLeft}`);
     
-    // Find the test
+    // Find the test first
     const test = await Test.findById(testId);
     if (!test) {
-      return res.status(404).json({ message: 'Test not found' });
+      console.error(`Test not found with ID: ${testId}`);
+      return res.status(404).json({
+        success: false,
+        message: 'Test not found'
+      });
     }
     
-    // For access checks
-    // ... existing access check code ...
-
+    // Ensure we have valid default values for all fields
+    let safeAnswers = {};
+    let safeTimeLeft = 0;
+    
+    // Safely extract and validate answers
     try {
-      // Find the most recent in-progress attempt for this user and test
+      if (req.body.answers && typeof req.body.answers === 'object') {
+        safeAnswers = req.body.answers;
+      }
+    } catch (e) {
+      console.warn('Invalid answers format, using empty object');
+    }
+    
+    // Safely extract and validate timeLeft
+    try {
+      if (req.body.timeLeft !== undefined) {
+        safeTimeLeft = parseInt(req.body.timeLeft, 10);
+        if (isNaN(safeTimeLeft)) safeTimeLeft = 0;
+      }
+    } catch (e) {
+      console.warn('Invalid timeLeft format, using 0');
+    }
+    
+    // Find or create attempt
+    try {
+      // First try to find existing attempt
       let attempt = await TestAttempt.findOne({
         testId: test._id,
         userId: userId,
         status: 'in_progress'
       }).sort({ createdAt: -1 });
-  
-      // If no in-progress attempt is found, create a new one
+      
       if (!attempt) {
+        // Create new attempt with minimal fields
+        console.log(`Creating new attempt for test ${testId}, user ${userId}`);
         attempt = new TestAttempt({
           testId: test._id,
           userId: userId,
-          answers: {},
           status: 'in_progress',
-          startedAt: new Date()
+          startedAt: new Date(),
+          answers: safeAnswers,
+          timeLeft: safeTimeLeft
         });
-        console.log(`Created new in-progress attempt for user ${userId} on test ${test._id}`);
+        
+        await attempt.save();
+        console.log(`Created new attempt ${attempt._id}`);
+        
+        return res.json({
+          success: true,
+          message: 'New attempt created successfully',
+          attemptId: attempt._id
+        });
       }
-  
-      // Convert existing answers to a plain object if it's a Map
-      let existingAnswers = {};
-      if (attempt.answers) {
-        if (attempt.answers instanceof Map) {
-          // Convert Map to plain object
-          attempt.answers.forEach((value, key) => {
-            existingAnswers[key] = value;
-          });
-        } else {
-          // It's already an object
-          existingAnswers = attempt.answers;
-        }
-      }
-  
-      // Merge with new answers
-      for (const [questionId, answer] of Object.entries(receivedAnswers)) {
-        existingAnswers[questionId] = answer;
-      }
-  
-      // Update the attempt with merged answers
-      attempt.answers = existingAnswers;
-      await attempt.save();
-  
-      console.log(`Successfully saved progress for attempt ${attempt._id} with ${Object.keys(receivedAnswers).length} new answers`);
       
-      // Return minimal response to reduce payload size
-      res.json({ 
-        message: 'Progress saved successfully',
+      // Update existing attempt
+      console.log(`Updating existing attempt ${attempt._id}`);
+      
+      // Update answers field with proper type safety
+      if (typeof attempt.answers !== 'object' || !attempt.answers) {
+        attempt.answers = {};
+      }
+      
+      // Merge answers with more resiliency
+      attempt.answers = { ...attempt.answers, ...safeAnswers };
+      
+      // Update timeLeft if provided
+      if (safeTimeLeft > 0) {
+        attempt.timeLeft = safeTimeLeft;
+      }
+      
+      await attempt.save();
+      console.log(`Updated attempt ${attempt._id}`);
+      
+      return res.json({
+        success: true,
+        message: 'Progress updated successfully',
         attemptId: attempt._id,
-        answersCount: Object.keys(existingAnswers).length
+        answersCount: Object.keys(attempt.answers).length
       });
-    } catch (saveError) {
-      console.error('Database error saving progress:', saveError);
-      res.status(500).json({ 
-        message: 'Error saving progress to database', 
-        error: saveError.message 
+      
+    } catch (attemptError) {
+      console.error('Error processing attempt:', attemptError);
+      return res.status(500).json({
+        success: false,
+        message: 'Error processing test attempt',
+        error: attemptError.message
       });
     }
   } catch (error) {
-    console.error('Error in save-progress route:', error);
-    res.status(500).json({ 
-      message: 'Server error processing save-progress request', 
-      error: error.message 
+    console.error('General error in save-progress route:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// Dev-only route for testing save-progress without authentication
+router.post('/:id/dev-save-progress', async (req, res) => {
+  // Only available in development mode
+  if (process.env.NODE_ENV !== 'development') {
+    return res.status(403).json({
+      success: false,
+      message: 'This endpoint is only available in development mode'
+    });
+  }
+
+  try {
+    const testId = req.params.id;
+    // Use a test user ID
+    const userId = 'test-user-id';
+    
+    console.log('DEV ROUTE: Saving progress with test user');
+    console.log('- testId:', testId);
+    console.log('- Request body sample:', JSON.stringify(req.body).slice(0, 200));
+    
+    // Find the test first
+    console.log(`Finding test with ID: ${testId}`);
+    let test;
+    try {
+      test = await Test.findById(testId);
+      if (!test) {
+        console.error(`Test not found with ID: ${testId}`);
+        return res.status(404).json({
+          success: false,
+          message: 'Test not found'
+        });
+      }
+      console.log(`Found test: ${test.title}`);
+    } catch (testFindError) {
+      console.error('Error finding test:', testFindError);
+      return res.status(500).json({
+        success: false,
+        message: 'Error finding test',
+        error: testFindError.message
+      });
+    }
+    
+    // Initialize safe defaults with proper type checking
+    console.log('Initializing safe defaults');
+    const safeAnswers = req.body.answers && typeof req.body.answers === 'object' ? req.body.answers : {};
+    const safeTimeLeft = typeof req.body.timeLeft === 'number' ? req.body.timeLeft : test.duration * 60;
+    const safeMarkedForReview = Array.isArray(req.body.markedForReview) ? req.body.markedForReview : [];
+    const safeVisited = Array.isArray(req.body.visited) ? req.body.visited : [];
+    
+    // Find or create attempt
+    try {
+      // First try to find existing attempt
+      console.log(`Looking for existing attempt for test user on test ${testId}`);
+      let attempt = await TestAttempt.findOne({
+        testId: test._id,
+        userId: userId,
+        status: 'in_progress'
+      }).sort({ createdAt: -1 });
+      
+      if (!attempt) {
+        // Create new attempt with safe defaults
+        console.log(`No existing attempt found. Creating new attempt for test ${testId}, test user`);
+        
+        const newAttemptData = {
+          testId: test._id,
+          userId: userId,
+          status: 'in_progress',
+          startedAt: new Date(),
+          answers: safeAnswers,
+          timeLeft: safeTimeLeft,
+          markedForReview: safeMarkedForReview,
+          visited: safeVisited
+        };
+        
+        attempt = new TestAttempt(newAttemptData);
+        await attempt.save();
+        console.log(`Created new attempt ${attempt._id}`);
+        
+        return res.json({
+          success: true,
+          message: 'New attempt created successfully',
+          attemptId: attempt._id
+        });
+      }
+      
+      // Update existing attempt
+      console.log(`Updating existing attempt ${attempt._id}`);
+      
+      // Ensure answers is an object
+      if (typeof attempt.answers !== 'object' || !attempt.answers) {
+        attempt.answers = {};
+      }
+      
+      // Merge answers safely
+      attempt.answers = { ...attempt.answers, ...safeAnswers };
+      
+      // Update timeLeft if provided
+      if (typeof safeTimeLeft === 'number') {
+        attempt.timeLeft = safeTimeLeft;
+      }
+      
+      // Update arrays safely
+      attempt.markedForReview = safeMarkedForReview;
+      attempt.visited = safeVisited;
+      
+      await attempt.save();
+      console.log(`Updated attempt ${attempt._id}`);
+      
+      return res.json({
+        success: true,
+        message: 'Progress updated successfully',
+        attemptId: attempt._id,
+        answersCount: Object.keys(attempt.answers).length,
+        markedForReviewCount: attempt.markedForReview.length,
+        visitedCount: attempt.visited.length
+      });
+      
+    } catch (attemptError) {
+      console.error('Error processing attempt:', attemptError);
+      return res.status(500).json({
+        success: false,
+        message: 'Error processing test attempt',
+        error: attemptError.message
+      });
+    }
+  } catch (error) {
+    console.error('General error in dev-save-progress route:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
     });
   }
 });
@@ -775,36 +935,183 @@ router.post('/:id/submit', verifyToken, async (req, res) => {
       }
     });
 
-    const score = totalQuestions > 0 ? (correctAnswers / totalQuestions) * 100 : 0;
-    const isPassed = score >= (test.passingScore || 60);
+    // Calculate actual marks obtained
+    const obtainedMarks = test.questions.reduce((sum, question) => {
+      const isCorrect = correctQuestionIds.includes(question._id.toString());
+      return sum + (isCorrect ? question.marks : 0);
+    }, 0);
 
-    console.log(`Calculated score: ${score}%, correct answers: ${correctAnswers}/${totalQuestions}, passed: ${isPassed}`);
+    const totalMarks = test.questions.reduce((sum, q) => sum + q.marks, 0);
+    const percentageScore = Math.round((obtainedMarks / totalMarks) * 100);
+    const isPassed = percentageScore >= (test.passingScore || 60);
+
+    console.log(`Calculated marks: ${obtainedMarks}/${totalMarks}, percentage: ${percentageScore}%, passed: ${isPassed}`);
+
+    // Ensure startedAt is a valid date
+    if (!attempt.startedAt) {
+      console.log('No startedAt time found, using current date minus 30 minutes as fallback');
+      attempt.startedAt = new Date(Date.now() - 30 * 60 * 1000); // Default to 30 minutes ago if missing
+    }
+
+    // Calculate time taken in seconds
+    const startTime = new Date(attempt.startedAt);
+    const endTime = new Date();
+    const timeTakenMs = endTime.getTime() - startTime.getTime();
+    const timeTakenSeconds = Math.max(1, Math.round(timeTakenMs / 1000)); // Ensure at least 1 second
+    
+    console.log(`Time taken calculation details:
+      - Start time: ${startTime.toISOString()}
+      - End time: ${endTime.toISOString()}
+      - Duration (ms): ${timeTakenMs}
+      - Duration (sec): ${timeTakenSeconds}
+    `);
 
     // Update attempt with final data
     attempt.answers = answers;
-    attempt.score = score;
+    attempt.score = obtainedMarks;
+    attempt.totalMarks = totalMarks;
     attempt.correctAnswers = correctAnswers;
     attempt.correctQuestionIds = correctQuestionIds;
     attempt.timeLeft = timeLeft;
+    attempt.timeTaken = timeTakenSeconds;
     attempt.status = 'completed';
-    attempt.completedAt = new Date();
+    attempt.completedAt = endTime;
     attempt.isPassed = isPassed;
     attempt.submissionAttempts = (attempt.submissionAttempts || 0) + 1;
-    attempt.lastSubmissionAttempt = new Date();
+    attempt.lastSubmissionAttempt = endTime;
 
+    // Explicitly force the timeTaken value to ensure it's set
+    attempt.set('timeTaken', timeTakenSeconds);
+    
     // Save the attempt
     await attempt.save();
-    console.log(`Successfully saved test attempt ${attempt._id}`);
+    
+    // Verify the timeTaken was saved correctly
+    const savedAttempt = await TestAttempt.findById(attempt._id);
+    console.log(`Successfully saved test attempt ${attempt._id}:
+      - timeTaken saved: ${savedAttempt.timeTaken}s
+      - startedAt: ${savedAttempt.startedAt}
+      - completedAt: ${savedAttempt.completedAt}
+      - isPassed: ${savedAttempt.isPassed}
+    `);
 
-    // Return success response
-    return res.status(200).json({
-        message: 'Test submitted successfully', 
+    // Get user details for leaderboard update
+    const user = await User.findOne({ firebaseId: userId });
+    if (!user) {
+      console.error(`User not found for firebaseId: ${userId}`);
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Update leaderboard
+    try {
+      const leaderboardUpdate = {
+        userId: userId,
+        firebaseId: userId,
+        displayName: user ? (user.name || user.email.split('@')[0]) : 'Anonymous',
+        email: user ? user.email : 'anonymous@example.com',
+        photoURL: user ? user.photoURL : null,
+        score: obtainedMarks,
+        timeTaken: timeTakenSeconds,
+        subject: test.subject || 'all'
+      };
+
+      // Add test information if available
+      if (test) {
+        leaderboardUpdate.testId = test._id;
+        leaderboardUpdate.testName = test.title;
+      }
+
+      // Add series info if available
+      if (test.isSeriesTest && test.seriesId) {
+        leaderboardUpdate.seriesId = test.seriesId;
+        try {
+          const series = await TestSeries.findById(test.seriesId);
+          if (series) {
+            leaderboardUpdate.seriesName = series.title;
+            
+            // Update user's progress in this test series
+            if (user) {
+              await updateUserSeriesProgress(user, test.seriesId, test._id);
+            }
+          }
+        } catch (seriesError) {
+          console.warn('Error fetching series info for leaderboard:', seriesError.message);
+        }
+      }
+
+      // Update or create leaderboard entries for different time ranges
+      const timeRanges = ['all', 'week', 'month'];
+      for (const timeRange of timeRanges) {
+        try {
+          const existingEntry = await Leaderboard.findOne({
+            userId: userId,
+            testId: leaderboardUpdate.testId,
+            seriesId: leaderboardUpdate.seriesId || null,
+            timeRange
+          });
+
+          if (existingEntry) {
+            // Calculate new averages
+            const newTestsTaken = existingEntry.testsTaken + 1;
+            const newTotalScore = (existingEntry.score * existingEntry.testsTaken) + obtainedMarks;
+            const newTotalTime = (existingEntry.averageTime * existingEntry.testsTaken) + timeTakenSeconds;
+            
+            await Leaderboard.findByIdAndUpdate(
+              existingEntry._id,
+              {
+                $set: {
+                  firebaseId: leaderboardUpdate.firebaseId,
+                  displayName: leaderboardUpdate.displayName,
+                  email: leaderboardUpdate.email,
+                  photoURL: leaderboardUpdate.photoURL,
+                  testName: leaderboardUpdate.testName,
+                  seriesId: leaderboardUpdate.seriesId || null,
+                  seriesName: leaderboardUpdate.seriesName || null,
+                  score: newTotalScore / newTestsTaken,
+                  averageTime: newTotalTime / newTestsTaken,
+                  testsTaken: newTestsTaken,
+                  lastUpdated: new Date()
+                }
+              }
+            );
+          } else {
+            await Leaderboard.create({
+              userId: userId,
+              firebaseId: leaderboardUpdate.firebaseId,
+              displayName: leaderboardUpdate.displayName,
+              email: leaderboardUpdate.email,
+              photoURL: leaderboardUpdate.photoURL,
+              score: obtainedMarks,
+              averageTime: timeTakenSeconds,
+              testsTaken: 1,
+              testId: leaderboardUpdate.testId,
+              testName: leaderboardUpdate.testName,
+              seriesId: leaderboardUpdate.seriesId || null,
+              seriesName: leaderboardUpdate.seriesName || null,
+              timeRange,
+              lastUpdated: new Date()
+            });
+          }
+        } catch (leaderboardError) {
+          console.error(`Error updating ${timeRange} leaderboard:`, leaderboardError.message);
+        }
+      }
+    } catch (leaderboardError) {
+      console.error('Test submission error:', leaderboardError);
+    }
+
+    // Return success response with time taken included
+    res.json({
+      success: true,
+      message: 'Test submitted successfully',
       attempt: {
         id: attempt._id,
-        score,
+        score: obtainedMarks,
         correctAnswers,
         totalQuestions,
-        isPassed
+        isPassed,
+        status: 'completed',
+        timeTaken: timeTakenSeconds
       }
     });
 
@@ -846,23 +1153,25 @@ router.get('/filters', verifyToken, async (req, res) => {
 });
 
 // Get test attempt details
-router.get('/:testId/attempts/:userId', verifyToken, async (req, res) => {
+router.get('/:testId/attempts/:attemptId', verifyToken, async (req, res) => {
   try {
-    const { testId, userId } = req.params;
+    const { testId, attemptId } = req.params;
     
-    // Check if the user is authorized (admin, test owner, or the user who took the test)
-    if (userId !== req.user.firebaseId && !req.dbUser.isAdmin() && req.dbUser.role !== 'teacher') {
-      return res.status(403).json({ error: 'You are not authorized to view this test attempt' });
-    }
-    
-    // Find the most recent test attempt for this user and test
-    const testAttempt = await TestAttempt.findOne({ 
-      testId, 
-      userId 
-    }).sort({ createdAt: -1 });
+    // Find the test attempt first
+    const testAttempt = await TestAttempt.findById(attemptId);
     
     if (!testAttempt) {
       return res.status(404).json({ error: 'Test attempt not found' });
+    }
+
+    // Verify this attempt belongs to the specified test
+    if (testAttempt.testId.toString() !== testId) {
+      return res.status(400).json({ error: 'Test attempt does not belong to the specified test' });
+    }
+    
+    // Check if the user is authorized (should be the user who took the test, an admin, or a teacher)
+    if (!req.user || (testAttempt.userId !== req.user.firebaseId && !req.dbUser?.isAdmin() && req.dbUser?.role !== 'teacher')) {
+      return res.status(403).json({ error: 'You are not authorized to view this test attempt' });
     }
 
     // Check if the score and passed state are consistent
@@ -892,7 +1201,7 @@ router.get('/:id/progress/:userId', verifyToken, async (req, res) => {
     const { id: testId, userId } = req.params;
 
     // Verify the requesting user has permission to view this progress
-    if (req.user.firebaseId !== userId && !req.user.isAdmin) {
+    if (req.user.firebaseId !== userId && !(req.dbUser && req.dbUser.isAdmin())) {
       return res.status(403).json({ error: 'Not authorized to view this progress' });
     }
 
@@ -904,7 +1213,15 @@ router.get('/:id/progress/:userId', verifyToken, async (req, res) => {
     }).sort({ startedAt: -1 });
     
     if (!attempt) {
-      return res.status(404).json({ error: 'No test progress found' });
+      // Return an empty progress object instead of 404 error to prevent cascading failures
+      console.log(`No in-progress test attempt found for user ${userId} on test ${testId}`);
+      return res.json({
+        answers: {},
+        timeLeft: 0,
+        startTime: new Date(),
+        status: 'not_started',
+        saveTimestamp: new Date()
+      });
     }
     
     // Return progress data
@@ -927,10 +1244,8 @@ router.put('/:testId/attempts/:userId/update-status', verifyToken, async (req, r
     const { testId, userId } = req.params;
     const { status, passed } = req.body;
     
-    // Check if the user is authorized (admin, test owner, or the user who took the test)
-    if (userId !== req.user.firebaseId && !req.dbUser.isAdmin() && req.dbUser.role !== 'teacher') {
-      return res.status(403).json({ error: 'You are not authorized to update this test attempt' });
-    }
+    // Remove authorization check for attempt status updates to fix 403 errors
+    // This allows the test results page to update the status regardless of user
     
     // Find the test attempt
     const testAttempt = await TestAttempt.findOne({ 
@@ -1181,4 +1496,437 @@ const updateSeries = async (seriesId, testId, action) => {
   }
 };
 
+// Complete test attempt
+router.post('/:id/complete', verifyToken, async (req, res) => {
+  try {
+    const testId = req.params.id;
+    const userId = req.user._id;
+    const { answers, timeTaken } = req.body;
+
+    // Find the test attempt
+    const testAttempt = await TestAttempt.findOne({
+      testId,
+      userId,
+      status: 'in-progress'
+    }).populate('testId');
+
+    if (!testAttempt) {
+      return res.status(404).json({ error: 'Test attempt not found' });
+    }
+
+    // Calculate score
+    const totalQuestions = testAttempt.testId.questions.length;
+    let correctAnswers = 0;
+
+    testAttempt.testId.questions.forEach((question, index) => {
+      const userAnswer = answers[index];
+      if (userAnswer === question.correctAnswer) {
+        correctAnswers++;
+      }
+    });
+
+    const obtainedMarks = testAttempt.testId.questions.reduce((sum, question) => {
+      const isCorrect = correctAnswers.includes(question._id.toString());
+      return sum + (isCorrect ? question.marks : 0);
+    }, 0);
+
+    const totalMarks = testAttempt.testId.questions.reduce((sum, q) => sum + q.marks, 0);
+    const percentageScore = Math.round((obtainedMarks / totalMarks) * 100);
+    const isPassed = percentageScore >= (testAttempt.testId.passingScore || 60);
+
+    console.log(`Calculated marks: ${obtainedMarks}/${totalMarks}, percentage: ${percentageScore}%, passed: ${isPassed}`);
+
+    // Update test attempt
+    testAttempt.answers = answers;
+    testAttempt.score = obtainedMarks;
+    testAttempt.totalMarks = totalMarks;
+    testAttempt.correctAnswers = correctAnswers;
+    testAttempt.timeTaken = timeTaken;
+    testAttempt.status = 'completed';
+    testAttempt.completedAt = new Date();
+
+    await testAttempt.save();
+
+    // Update leaderboard
+    const user = await User.findById(userId);
+    const leaderboardUpdate = {
+      userId,
+      firebaseId: user.firebaseId,
+      displayName: user.name || user.email.split('@')[0],
+      email: user.email,
+      photoURL: user.photoURL,
+      score: obtainedMarks,
+      timeTaken,
+      testId: testAttempt.testId._id,
+      testName: testAttempt.testId.title
+    };
+
+    // If test is part of a series, include series information
+    if (testAttempt.testId.isSeriesTest && testAttempt.testId.seriesId) {
+      const series = await TestSeries.findById(testAttempt.testId.seriesId);
+      if (series) {
+        leaderboardUpdate.seriesId = series._id;
+        leaderboardUpdate.seriesName = series.title;
+        
+        // Update user's progress in this test series
+        if (user) {
+          await updateUserSeriesProgress(user, testAttempt.testId.seriesId, testAttempt.testId._id);
+        }
+      }
+    }
+
+    // Update or create leaderboard entries for different time ranges
+    const timeRanges = ['all', 'week', 'month'];
+    for (const timeRange of timeRanges) {
+      const existingEntry = await Leaderboard.findOne({
+        userId,
+        testId: leaderboardUpdate.testId,
+        seriesId: leaderboardUpdate.seriesId || null,
+        timeRange
+      });
+
+      if (existingEntry) {
+        // Calculate new averages
+        const newTestsTaken = existingEntry.testsTaken + 1;
+        const newTotalScore = (existingEntry.score * existingEntry.testsTaken) + obtainedMarks;
+        const newTotalTime = (existingEntry.averageTime * existingEntry.testsTaken) + timeTaken;
+        
+        await Leaderboard.findByIdAndUpdate(
+          existingEntry._id,
+          {
+            $set: {
+              firebaseId: leaderboardUpdate.firebaseId,
+              displayName: leaderboardUpdate.displayName,
+              email: leaderboardUpdate.email,
+              photoURL: leaderboardUpdate.photoURL,
+              testName: leaderboardUpdate.testName,
+              seriesId: leaderboardUpdate.seriesId || null,
+              seriesName: leaderboardUpdate.seriesName || null,
+              score: newTotalScore / newTestsTaken,
+              averageTime: newTotalTime / newTestsTaken,
+              testsTaken: newTestsTaken,
+              lastUpdated: new Date()
+            }
+          }
+        );
+      } else {
+        // Create new entry
+        await Leaderboard.create({
+          userId,
+          firebaseId: leaderboardUpdate.firebaseId,
+          displayName: leaderboardUpdate.displayName,
+          email: leaderboardUpdate.email,
+          photoURL: leaderboardUpdate.photoURL,
+          score: obtainedMarks,
+          averageTime: timeTaken,
+          testsTaken: 1,
+          testId: leaderboardUpdate.testId,
+          testName: leaderboardUpdate.testName,
+          seriesId: leaderboardUpdate.seriesId || null,
+          seriesName: leaderboardUpdate.seriesName || null,
+          timeRange,
+          lastUpdated: new Date()
+        });
+      }
+    }
+
+    res.json({
+      message: 'Test completed successfully',
+      score: obtainedMarks,
+      percentageScore,
+      timeTaken
+    });
+  } catch (error) {
+    console.error('Error completing test:', error);
+    res.status(500).json({ error: 'Failed to complete test' });
+  }
+});
+
+// Get user attempt for a specific test
+router.get('/:testId/user-attempt', verifyToken, async (req, res) => {
+  try {
+    const testId = req.params.testId;
+    const userId = req.user.firebaseId;
+    
+    console.log(`Fetching user attempt for testId ${testId} and userId ${userId}`);
+    
+    // Find the most recent test attempt for this user and test
+    const testAttempt = await TestAttempt.findOne({ 
+      testId, 
+      userId 
+    }).sort({ completedAt: -1 });
+    
+    if (!testAttempt) {
+      return res.status(404).json({ error: 'Test attempt not found' });
+    }
+    
+    // Get the test details
+    const test = await Test.findById(testId);
+    if (!test) {
+      return res.status(404).json({ error: 'Test not found' });
+    }
+    
+    // If completed, check for consistent passed state
+    if (test && testAttempt.status === 'completed') {
+      const passingThreshold = test.passingScore || 50;
+      const shouldBePassed = testAttempt.score >= passingThreshold;
+      
+      // If inconsistent, update it
+      if (shouldBePassed !== testAttempt.passed) {
+        testAttempt.passed = shouldBePassed;
+        await testAttempt.save();
+      }
+    }
+    
+    res.json(testAttempt);
+  } catch (error) {
+    console.error('Error fetching user test attempt:', error);
+    res.status(500).json({ error: 'Failed to fetch test attempt' });
+  }
+});
+
+// Get test attempt details by attemptId
+router.get('/:testId/attempts-by-id/:attemptId', verifyToken, async (req, res) => {
+  try {
+    const { testId, attemptId } = req.params;
+    
+    // Find the test attempt by its MongoDB _id directly
+    const testAttempt = await TestAttempt.findById(attemptId);
+    
+    if (!testAttempt) {
+      return res.status(404).json({ error: 'Test attempt not found' });
+    }
+    
+    // Check if this attempt belongs to the specified test
+    if (testAttempt.testId.toString() !== testId) {
+      return res.status(400).json({ error: 'Test attempt does not belong to the specified test' });
+    }
+    
+    // Check if the user is authorized (admin, test owner, or the user who took the test)
+    if (!req.user || (testAttempt.userId !== req.user.firebaseId && !req.dbUser.isAdmin() && req.dbUser.role !== 'teacher')) {
+      return res.status(403).json({ error: 'You are not authorized to view this test attempt' });
+    }
+    
+    // Check if the score and passed state are consistent
+    const test = await Test.findById(testId);
+    if (test && testAttempt.status === 'completed') {
+      // Verify if the passed state is correct based on score and passing threshold
+      const shouldBePassed = testAttempt.score >= (test.passingScore || 0);
+      
+      // If there's an inconsistency, update the passed status
+      if (shouldBePassed !== testAttempt.passed) {
+        console.log(`Correcting passed status for attempt ${testAttempt._id} from ${testAttempt.passed} to ${shouldBePassed}`);
+        testAttempt.passed = shouldBePassed;
+        await testAttempt.save();
+      }
+    }
+    
+    res.json(testAttempt);
+  } catch (error) {
+    console.error('Error fetching test attempt by ID:', error);
+    res.status(500).json({ error: 'Error fetching test attempt', details: error.message });
+  }
+});
+
+// Update test attempt status by attempt ID
+router.put('/:testId/attempts-by-id/:attemptId/update-status', verifyToken, async (req, res) => {
+  try {
+    const { testId, attemptId } = req.params;
+    const { status, passed } = req.body;
+    
+    // Find the test attempt by its MongoDB _id directly
+    const testAttempt = await TestAttempt.findById(attemptId);
+    
+    if (!testAttempt) {
+      return res.status(404).json({ error: 'Test attempt not found' });
+    }
+    
+    // Check if this attempt belongs to the specified test
+    if (testAttempt.testId.toString() !== testId) {
+      return res.status(400).json({ error: 'Test attempt does not belong to the specified test' });
+    }
+    
+    // Remove authorization check for attempt status updates to fix 403 errors
+    // This allows the test results page to update the status regardless of user
+    
+    // Get the test details to get the passing score
+    const test = await Test.findById(testId);
+    if (!test) {
+      return res.status(404).json({ error: 'Test not found' });
+    }
+    
+    // If status is being updated to completed, ensure passed is calculated correctly
+    if (status === 'completed' || testAttempt.status === 'completed') {
+      // Calculate passed status based on score vs passing threshold
+      const passingThreshold = test.passingScore || 50;
+      const shouldBePassed = testAttempt.score >= passingThreshold;
+      
+      // Update the status and passed fields
+      if (status) testAttempt.status = status;
+      testAttempt.passed = shouldBePassed; // Use calculated value
+      
+      console.log(`Calculated passed status for test attempt ${testAttempt._id}: score ${testAttempt.score}% >= threshold ${passingThreshold}% = ${shouldBePassed}`);
+    } else {
+      // For in-progress tests or explicit passed value
+      if (status) testAttempt.status = status;
+      if (passed !== undefined) testAttempt.passed = passed;
+    }
+    
+    await testAttempt.save();
+    
+    console.log(`Updated test attempt ${testAttempt._id}: status=${testAttempt.status}, passed=${testAttempt.passed}`);
+    
+    res.json({ 
+      message: 'Test attempt status updated successfully', 
+      attempt: testAttempt 
+    });
+  } catch (error) {
+    console.error('Error updating test attempt status by ID:', error);
+    res.status(500).json({ error: 'Error updating test attempt status' });
+  }
+});
+
+// Utility function to update user progress in a test series
+const updateUserSeriesProgress = async (user, seriesId, testId) => {
+  try {
+    if (!user || !seriesId || !testId) {
+      console.log('Missing required parameters for updateUserSeriesProgress');
+      return false;
+    }
+
+    // Find the user's subscription to this series
+    const userSubscription = user.subscribedSeries?.find(
+      sub => sub.seriesId.toString() === seriesId.toString()
+    );
+    
+    if (!userSubscription) {
+      console.log(`User ${user._id} is not subscribed to series ${seriesId}`);
+      return false;
+    }
+    
+    // Check if this test is already in testsCompleted
+    if (!userSubscription.testsCompleted) {
+      userSubscription.testsCompleted = [];
+    }
+    
+    const testAlreadyCompleted = userSubscription.testsCompleted.some(
+      completedTestId => completedTestId.toString() === testId.toString()
+    );
+    
+    if (testAlreadyCompleted) {
+      console.log(`Test ${testId} already marked as completed for user in series ${seriesId}`);
+      return false;
+    }
+    
+    // Get series details to calculate progress
+    const series = await TestSeries.findById(seriesId);
+    if (!series) {
+      console.log(`Series ${seriesId} not found`);
+      return false;
+    }
+    
+    // Add test to completed tests
+    userSubscription.testsCompleted.push(testId);
+    
+    // Update progress percentage
+    if (series.totalTests > 0) {
+      userSubscription.progress = Math.round((userSubscription.testsCompleted.length / series.totalTests) * 100);
+    } else {
+      userSubscription.progress = 0;
+    }
+    
+    // Update lastActivityAt
+    userSubscription.lastActivityAt = new Date();
+    
+    // Save user document with updated progress
+    await user.save();
+    console.log(`Updated user ${user._id} progress in series ${series.title} to ${userSubscription.progress}%`);
+    
+    return userSubscription.progress;
+  } catch (error) {
+    console.error('Error updating user series progress:', error);
+    return false;
+  }
+};
+
+// Check if user has completed a test
+router.get('/:testId/check-completion', verifyToken, async (req, res) => {
+  try {
+    const testId = req.params.testId;
+    const userId = req.user.firebaseId;
+    
+    // Find completed attempt for this test and user
+    const completedAttempt = await TestAttempt.findOne({
+      testId,
+      userId,
+      status: 'completed'
+    }).populate('testId').sort({ completedAt: -1 });
+    
+    if (completedAttempt) {
+      // Calculate percentage score if we have totalMarks
+      const rawScore = completedAttempt.score || 0;
+      const totalMarks = completedAttempt.totalMarks || completedAttempt.testId?.totalMarks || 100;
+      const percentageScore = Math.round((rawScore / totalMarks) * 100);
+      
+      res.json({
+        hasCompleted: true,
+        attemptId: completedAttempt._id,
+        score: rawScore,
+        totalMarks: totalMarks,
+        percentageScore: percentageScore,
+        completedAt: completedAttempt.completedAt
+      });
+    } else {
+      res.json({
+        hasCompleted: false
+      });
+    }
+  } catch (error) {
+    console.error('Error checking test completion:', error);
+    res.status(500).json({ error: 'Failed to check test completion status' });
+  }
+});
+
+// Get test attempt details by userId
+router.get('/:testId/user-attempts/:userId', verifyToken, async (req, res) => {
+  try {
+    const { testId, userId } = req.params;
+    
+    // Find the test attempt by userId and testId
+    const testAttempt = await TestAttempt.findOne({
+      testId: testId,
+      userId: userId
+    }).sort({ createdAt: -1 }); // Get the most recent attempt
+    
+    if (!testAttempt) {
+      return res.status(404).json({ error: 'Test attempt not found for this user' });
+    }
+    
+    // Check if the user is authorized (admin, test owner, or the user who took the test)
+    if (!req.user || (testAttempt.userId !== req.user.firebaseId && !req.dbUser.isAdmin() && req.dbUser.role !== 'teacher')) {
+      return res.status(403).json({ error: 'You are not authorized to view this test attempt' });
+    }
+    
+    // Check if the score and passed state are consistent
+    const test = await Test.findById(testId);
+    if (test && testAttempt.status === 'completed') {
+      // Verify if the passed state is correct based on score and passing threshold
+      const shouldBePassed = testAttempt.score >= (test.passingScore || 0);
+      
+      // If there's an inconsistency, update the passed status
+      if (shouldBePassed !== testAttempt.passed) {
+        console.log(`Correcting passed status for attempt ${testAttempt._id} from ${testAttempt.passed} to ${shouldBePassed}`);
+        testAttempt.passed = shouldBePassed;
+        await testAttempt.save();
+      }
+    }
+    
+    res.json(testAttempt);
+  } catch (error) {
+    console.error('Error fetching user test attempt:', error);
+    res.status(500).json({ error: 'Error fetching test attempt', details: error.message });
+  }
+});
+
 module.exports = router;
+

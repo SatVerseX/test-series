@@ -35,6 +35,7 @@ import {
   School as SchoolIcon,
   MenuBook as MenuBookIcon,
   AssignmentTurnedIn as AssignmentTurnedInIcon,
+  Leaderboard as LeaderboardIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -93,15 +94,14 @@ const Navbar = ({ toggleColorMode, mode }) => {
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
   };
-
+  
+//{ text: 'Tests', path: '/tests', icon: <AssignmentIcon /> },
   const userMenuItems = [
     { text: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
-    { text: 'Tests', path: '/tests', icon: <AssignmentIcon /> },
     { text: 'My Tests', path: '/my-tests', icon: <AssignmentTurnedInIcon /> },
     { text: 'Test Series', path: '/test-series', icon: <MenuBookIcon /> },
     { text: 'Library', path: '/library', icon: <MenuBookIcon /> },
-    { text: 'Leaderboard', path: '/leaderboard', icon: <EmojiEventsIcon /> },
-    //{ text: 'Profile', path: '/profile', icon: <PersonIcon /> },
+    { text: 'Leaderboard', path: '/test-leaderboard', icon: <LeaderboardIcon /> },
   ];
 
   const adminMenuItems = [

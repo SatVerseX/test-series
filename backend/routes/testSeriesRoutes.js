@@ -548,4 +548,198 @@ router.get('/:id/leaderboard', verifyToken, async (req, res) => {
   }
 });
 
+// Subscribe to a test series
+router.post('/:id/subscribe', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.firebaseId;
+    
+    // Check if the user exists
+    const user = await User.findOne({ firebaseId: userId });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if the test series exists
+    const testSeries = await TestSeries.findById(id);
+    if (!testSeries) {
+      return res.status(404).json({ error: 'Test series not found' });
+    }
+    
+    // Check if the test series is paid
+    if (testSeries.isPaid) {
+      return res.status(403).json({ 
+        error: 'Cannot subscribe to a paid test series. Please purchase it instead.' 
+      });
+    }
+    
+    // Check if user is already subscribed to this series
+    if (!user.subscribedSeries) {
+      user.subscribedSeries = [];
+    }
+    
+    const isAlreadySubscribed = user.subscribedSeries.some(
+      sub => sub.seriesId.toString() === id
+    );
+    
+    if (isAlreadySubscribed) {
+      return res.status(200).json({ 
+        message: 'Already subscribed', 
+        isSubscribed: true 
+      });
+    }
+    
+    // Add the series to the user's subscriptions
+    user.subscribedSeries.push({
+      seriesId: id,
+      subscribedAt: new Date(),
+      progress: 0
+    });
+    
+    await user.save();
+    
+    // Update test series stats
+    testSeries.students = (testSeries.students || 0) + 1;
+    await testSeries.save();
+    
+    res.status(200).json({ 
+      message: 'Successfully subscribed to test series',
+      isSubscribed: true
+    });
+  } catch (error) {
+    console.error('Error subscribing to test series:', error);
+    res.status(500).json({ error: 'Failed to subscribe to test series' });
+  }
+});
+
+// Check if user is subscribed to a test series
+router.get('/:id/subscription-status', verifyToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.firebaseId;
+    
+    // Check if the user exists
+    const user = await User.findOne({ firebaseId: userId });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Check if user is subscribed to this series
+    const isSubscribed = user.subscribedSeries && user.subscribedSeries.some(
+      sub => sub.seriesId.toString() === id
+    );
+    
+    res.status(200).json({ isSubscribed });
+  } catch (error) {
+    console.error('Error checking subscription status:', error);
+    res.status(500).json({ error: 'Failed to check subscription status' });
+  }
+});
+
+// Get user's subscribed test series
+router.get('/user/subscribed', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.firebaseId;
+    
+    // Check if the user exists
+    const user = await User.findOne({ firebaseId: userId })
+      .populate({
+        path: 'subscribedSeries.seriesId',
+        select: 'title description subject category totalTests imageUrl'
+      });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // If user has no subscribed series, return an empty array
+    if (!user.subscribedSeries || user.subscribedSeries.length === 0) {
+      return res.json([]);
+    }
+    
+    // Format subscribed series data
+    const subscribedSeries = user.subscribedSeries
+      .filter(item => item.seriesId) // Filter out any with missing series (might have been deleted)
+      .map(item => {
+        const series = item.seriesId;
+        return {
+          _id: series._id,
+          title: series.title,
+          description: series.description,
+          category: series.category,
+          subject: series.subject,
+          totalTests: series.totalTests || 0,
+          imageUrl: series.imageUrl,
+          subscribedAt: item.subscribedAt,
+          progress: item.progress || 0
+        };
+      });
+    
+    res.status(200).json(subscribedSeries);
+  } catch (error) {
+    console.error('Error fetching subscribed series:', error);
+    res.status(500).json({ error: 'Failed to fetch subscribed series' });
+  }
+});
+
+// Get user's progress in a specific test series
+router.get('/:id/progress', verifyToken, async (req, res) => {
+  try {
+    const seriesId = req.params.id;
+    const userId = req.user.firebaseId;
+    
+    // Get the user with their subscription data
+    const user = await User.findOne({ firebaseId: userId });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    // Find the user's subscription to this series
+    const seriesSubscription = user.subscribedSeries?.find(
+      sub => sub.seriesId.toString() === seriesId
+    );
+    
+    if (!seriesSubscription) {
+      return res.json({ 
+        isSubscribed: false,
+        progress: 0,
+        testsCompleted: []
+      });
+    }
+    
+    // Get series details
+    const series = await TestSeries.findById(seriesId)
+      .populate('tests', 'title description');
+    
+    if (!series) {
+      return res.status(404).json({ error: 'Test series not found' });
+    }
+    
+    // Create detailed progress info
+    const completedTests = await Test.find({
+      _id: { $in: seriesSubscription.testsCompleted }
+    }).select('_id title description');
+    
+    // Format response
+    const progressData = {
+      isSubscribed: true,
+      progress: seriesSubscription.progress || 0,
+      testsCompleted: seriesSubscription.testsCompleted?.length || 0,
+      totalTests: series.totalTests || 0,
+      lastActivity: seriesSubscription.lastActivityAt,
+      completedTestsDetails: completedTests,
+      pendingTests: series.tests.filter(test => 
+        !seriesSubscription.testsCompleted?.some(
+          id => id.toString() === test._id.toString()
+        )
+      )
+    };
+    
+    res.json(progressData);
+  } catch (error) {
+    console.error('Error fetching user progress:', error);
+    res.status(500).json({ error: 'Failed to fetch user progress' });
+  }
+});
+
 module.exports = router; 

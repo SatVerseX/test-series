@@ -55,7 +55,11 @@ const COLORS = {
 };
 
 const TestResultsPage = () => {
-  const { testId, userId } = useParams();
+  const params = useParams();
+  const { testId, userId } = params;
+  // Extract attemptId from both URL formats - either direct or from the /attempt/ path
+  const attemptId = params.attemptId || null;
+  
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [testData, setTestData] = useState(null);
@@ -66,9 +70,24 @@ const TestResultsPage = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const navigate = useNavigate();
+  
+  console.log('URL params:', { testId, userId, attemptId });
 
   useEffect(() => {
     const fetchTestResults = async () => {
+      if (!testId) {
+        setError('Test ID is required');
+        setLoading(false);
+        return;
+      }
+
+      // If we don't have either userId or user.firebaseId, show error
+      if (!userId && !user?.firebaseId) {
+        setError('User authentication required');
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       try {
         // First fetch the test data
@@ -78,21 +97,76 @@ const TestResultsPage = () => {
         }
         setTestData(testResponse.data);
 
-        // Then fetch the attempt data using the correct endpoint
-        const attemptResponse = await api.get(`/api/tests/${testId}/attempts/${userId}`);
-        if (!attemptResponse.data) {
-          throw new Error('Test attempt not found');
+        // Then fetch the attempt data using multiple endpoints if needed
+        let attemptData = null;
+        let fetchError = null;
+        
+        // Use Firebase ID instead of MongoDB _id
+        const effectiveUserId = userId || user?.firebaseId;
+        console.log('Using effectiveUserId for attempt lookup:', effectiveUserId);
+        
+        // 1. First try to see if attemptId is present and valid
+        if (attemptId && attemptId !== 'undefined') {
+          try {
+            console.log(`Trying to fetch attempt by ID: ${attemptId}`);
+            const attemptByIdResponse = await api.get(`/api/tests/${testId}/attempts-by-id/${attemptId}`);
+            if (attemptByIdResponse.data) {
+              console.log('Successfully fetched attempt by ID');
+              attemptData = attemptByIdResponse.data;
+            }
+          } catch (err) {
+            console.log('Error fetching by attempt ID:', err);
+            fetchError = err;
+          }
         }
-        setTestAttempt(attemptResponse.data);
+        
+        // 2. If not found, try user-attempt endpoint (most recent attempt)
+        if (!attemptData) {
+          try {
+            console.log(`Trying to fetch most recent attempt for user: ${effectiveUserId}`);
+            const userAttemptResponse = await api.get(`/api/tests/${testId}/user-attempt`);
+            if (userAttemptResponse.data) {
+              console.log('Successfully fetched most recent user attempt');
+              attemptData = userAttemptResponse.data;
+            }
+          } catch (err) {
+            console.log('Error fetching most recent user attempt:', err);
+            if (!fetchError) fetchError = err;
+          }
+        }
+        
+        // 3. If still not found, try user-attempts endpoint with userId
+        if (!attemptData) {
+          try {
+            console.log(`Trying to fetch attempts for user ID: ${effectiveUserId}`);
+            const userAttemptsResponse = await api.get(`/api/tests/${testId}/user-attempts/${effectiveUserId}`);
+            if (userAttemptsResponse.data) {
+              console.log('Successfully fetched user attempt by ID');
+              attemptData = userAttemptsResponse.data;
+            }
+          } catch (err) {
+            console.log('Error fetching by user ID:', err);
+            if (!fetchError) fetchError = err;
+          }
+        }
+        
+        // If we still don't have data, throw the last error
+        if (!attemptData) {
+          throw fetchError || new Error('No test attempt found');
+        }
+        
+        setTestAttempt(attemptData);
 
         // Calculate score and check if passed
-        const attempt = attemptResponse.data;
+        const attempt = attemptData;
         const score = attempt.score || 0;
+        const totalMarks = attempt.totalMarks || 0;
+        const scorePercentage = totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0;
         const passingScore = testResponse.data.passingScore || 60;
-        const isPassed = score >= passingScore;
+        const isPassed = scorePercentage >= passingScore;
 
         // Show confetti for passing scores
-        if (isPassed && score >= 80) {
+        if (isPassed && scorePercentage >= 80) {
           setTimeout(() => {
             confetti({
               particleCount: 100,
@@ -100,14 +174,6 @@ const TestResultsPage = () => {
               origin: { y: 0.6 }
             });
           }, 1000);
-        }
-
-        // Update attempt status if needed
-        if (attempt.isPassed !== isPassed) {
-          await api.put(`/api/tests/${testId}/attempts/${userId}/update-status`, {
-            status: 'completed',
-            passed: isPassed
-          });
         }
 
       } catch (err) {
@@ -118,10 +184,8 @@ const TestResultsPage = () => {
       }
     };
 
-    if (testId && userId) {
     fetchTestResults();
-    }
-  }, [testId, userId]);
+  }, [testId, user?.firebaseId, attemptId]); // Include attemptId in the dependency array
 
   const getBadgeInfo = (score) => {
     if (score === 100) return { 
@@ -493,11 +557,23 @@ const TestResultsPage = () => {
   }
 
   const score = testAttempt.score || 0;
+  const totalMarks = testAttempt.totalMarks || 0;
+  const scorePercentage = totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0;
   const correctAnswers = testAttempt.correctAnswers || 0;
   const incorrectAnswers = testAttempt.incorrectAnswers || 0;
   const totalQuestions = testData.questions?.length || 0;
   const unattemptedQuestions = totalQuestions - (correctAnswers + incorrectAnswers);
-  const timeTaken = testAttempt.timeTaken || 0;
+  
+  // Calculate time taken more accurately
+  let timeTaken = testAttempt.timeTaken || 0;
+  // If timeTaken is 0 or very small, calculate it from timeLeft and test duration
+  if (timeTaken <= 1 && testAttempt.timeLeft && testData.duration) {
+    const testDurationInSeconds = testData.duration * 60; // Convert minutes to seconds
+    const timeLeft = testAttempt.timeLeft;
+    timeTaken = Math.max(testDurationInSeconds - timeLeft, 1); // Ensure at least 1 second
+    console.log(`Calculated time taken: ${timeTaken}s (Duration: ${testDurationInSeconds}s - TimeLeft: ${timeLeft}s)`);
+  }
+  
   const averageTimePerQuestion = totalQuestions ? Math.round(timeTaken / totalQuestions) : 0;
   const completionSpeed = averageTimePerQuestion > 180 ? 'Slow' : averageTimePerQuestion > 90 ? 'Moderate' : 'Fast';
 
@@ -572,6 +648,7 @@ const TestResultsPage = () => {
               <Box 
                 sx={{ 
                   display: 'flex', 
+                  flexDirection: 'column',
                   alignItems: 'center', 
                   justifyContent: 'center',
                   mb: 3
@@ -581,28 +658,38 @@ const TestResultsPage = () => {
                   sx={{ 
                     width: 80, 
                     height: 80, 
-                    bgcolor: score >= 70 
+                    bgcolor: scorePercentage >= 70 
                       ? COLORS.success.light 
-                      : score >= 40 
+                      : scorePercentage >= 40 
                         ? COLORS.warning.light 
                         : COLORS.error.light,
-                    color: score >= 70 
+                    color: scorePercentage >= 70 
                       ? COLORS.success.text 
-                      : score >= 40 
+                      : scorePercentage >= 40 
                         ? COLORS.warning.text 
                         : COLORS.error.text,
-                    border: `2px solid ${score >= 70 
+                    border: `2px solid ${scorePercentage >= 70 
                       ? COLORS.success.border 
-                      : score >= 40 
+                      : scorePercentage >= 40 
                         ? COLORS.warning.border 
                         : COLORS.error.border}`,
                     boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
                   }}
                 >
                   <Typography variant="h4">
-                    {score}%
+                    {scorePercentage}%
                   </Typography>
                 </Avatar>
+                <Typography 
+                  variant="h6" 
+                  sx={{ 
+                    mt: 1,
+                    fontWeight: 600,
+                    color: theme.palette.text.primary
+                  }}
+                >
+                  {score} / {totalMarks} Marks
+                </Typography>
               </Box>
 
               <Grid container spacing={3}>
@@ -695,9 +782,17 @@ const TestResultsPage = () => {
                       <Typography variant="body2" color="primary">
                         Time Taken
                       </Typography>
-                      <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
-                        {formatTime(timeTaken)}
-                      </Typography>
+                      <Tooltip 
+                        title={timeTaken <= 1 && testAttempt.timeLeft && testData.duration ? 
+                          `Calculated from test duration (${testData.duration} min) minus time left (${Math.floor(testAttempt.timeLeft / 60)}m ${testAttempt.timeLeft % 60}s)` : 
+                          "Actual time spent on the test"
+                        }
+                        arrow
+                      >
+                        <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                          {formatTime(timeTaken)}
+                        </Typography>
+                      </Tooltip>
                     </Box>
                   </Box>
                 </Grid>
@@ -714,7 +809,7 @@ const TestResultsPage = () => {
           }}>
             <Button
               variant="contained"
-              onClick={() => navigate(`/test-review/${testId}/${userId || user.id}`)}
+              onClick={() => navigate(`/test-review/${testId}/${userId || user.id}${attemptId ? `/${attemptId}` : ''}`)}
               startIcon={<AssessmentIcon />}
               sx={{
                 borderRadius: '12px',

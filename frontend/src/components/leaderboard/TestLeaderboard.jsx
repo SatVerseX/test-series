@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Paper,
@@ -62,85 +62,207 @@ const tableRowVariants = {
 };
 
 const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
-  const { user } = useAuth();
+  const { user, api: authApi } = useAuth();
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const [leaderboardData, setLeaderboardData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [page, setPage] = useState(0);
+  const [error, setError] = useState('');
+  const [totalPages, setTotalPages] = useState(1);
+  const [currentPage, setCurrentPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [totalItems, setTotalItems] = useState(0);
   const [timeRange, setTimeRange] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredData, setFilteredData] = useState([]);
   const [testData, setTestData] = useState(null);
+  const [isFetchingData, setIsFetchingData] = useState(false);
+  const [csvData, setCsvData] = useState([]);
+  const abortControllerRef = useRef(null);
 
   useEffect(() => {
-    const fetchLeaderboard = async () => {
+    if (!testId) return;
+
+    // Cleanup function for previous requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setIsFetchingData(true);
+    setLoading(true);
+
+    // Define fetchData function within useEffect to handle both API calls
+    const fetchData = async () => {
       try {
-        if (!user) {
-          setError('Please login to view leaderboard');
-          setLoading(false);
-          return;
-        }
+        setError('');
+        // Use the auth API instance if available (from useAuth), otherwise use the imported API
+        const apiToUse = authApi || api;
 
-        if (!testId) {
-          setError('No test specified');
-          setLoading(false);
-          return;
-        }
+        // First, make sure the test exists
+        let testData = null;
+        try {
+          const testResponse = await apiToUse.get(`/api/tests/${testId}`, {
+            signal: controller.signal,
+            timeout: 15000 // Add a more reasonable timeout
+          });
 
-        console.log('Fetching test leaderboard with params:', {
-          testId,
-          timeRange,
-          page: page + 1,
-          limit: rowsPerPage
-        });
-
-        // Get test details first
-        const testResponse = await api.get(`/api/tests/${testId}`);
-        if (testResponse.data) {
-          setTestData(testResponse.data);
-        }
-
-        const response = await api.get(`/api/tests/${testId}/leaderboard`, {
-          params: {
-            timeRange,
-            page: page + 1,
-            limit: rowsPerPage
+          if (testResponse.data) {
+            testData = testResponse.data;
+            setTestData(testResponse.data);
+          } else {
+            setError('Test not found. Please select a valid test.');
+            setLoading(false);
+            setIsFetchingData(false);
+            return;
           }
-        });
-
-        console.log('Test Leaderboard response:', response.data);
-
-        if (response.data && response.data.leaderboard) {
-          setLeaderboardData(response.data.leaderboard);
-          setTotalItems(response.data.pagination.totalItems);
-          setError(null);
-        } else {
-          throw new Error('Invalid response format');
+        } catch (testErr) {
+          // Only log error if not aborted
+          if (!controller.signal.aborted) {
+            console.error('Error fetching test details:', testErr);
+          }
         }
-      } catch (err) {
-        console.error('Error fetching test leaderboard:', err);
-        if (err.response?.status === 401) {
-          setError('Please login to view leaderboard');
-          navigate('/login');
-        } else if (err.response?.status === 404) {
-          setError('Leaderboard data not found for this test');
-        } else if (err.message === 'Network Error') {
-          setError('Unable to connect to server. Please check your internet connection.');
-        } else {
-          setError(err.response?.data?.error || 'Failed to fetch leaderboard data');
+        
+        // If testData is null and request wasn't aborted, retry once
+        if (!testData && !controller.signal.aborted) {
+          try {
+            const retryResponse = await apiToUse.get(`/api/tests/${testId}`, {
+              signal: controller.signal,
+              timeout: 15000
+            });
+            testData = retryResponse.data;
+            setTestData(retryResponse.data);
+          } catch (retryErr) {
+            if (!controller.signal.aborted) {
+              console.error('Error retrying test details fetch:', retryErr);
+            }
+          }
+        }
+
+        // Proceed with leaderboard only if request wasn't aborted
+        if (!controller.signal.aborted) {
+          try {
+            // Now fetch the leaderboard data
+            const response = await apiToUse.get(`/api/leaderboard/test/${testId}`, {
+              params: {
+                page: currentPage + 1,
+                limit: rowsPerPage,
+                timeRange
+              },
+              signal: controller.signal,
+              timeout: 15000 // Add a more reasonable timeout
+            });
+
+            if (response.data && !controller.signal.aborted) {
+              // Check the structure of the response
+              console.log('Leaderboard API response:', response.data);
+              
+              // Handle both array format and object with leaderboard property
+              const leaderboardEntries = Array.isArray(response.data) 
+                ? response.data 
+                : (response.data.leaderboard || []);
+                
+              // Get pagination info if available
+              const totalPagesCount = response.data.totalPages || 
+                                      response.data.pagination?.totalPages || 
+                                      Math.ceil(leaderboardEntries.length / rowsPerPage) || 
+                                      1;
+              
+              setLeaderboardData(leaderboardEntries);
+              setFilteredData(leaderboardEntries);
+              setTotalPages(totalPagesCount);
+
+              // Prepare CSV data
+              const csvData = [
+                ['Rank', 'Name', 'Score', 'Accuracy', 'Time Taken', 'Date Completed']
+              ];
+
+              leaderboardEntries.forEach((entry, index) => {
+                csvData.push([
+                  index + 1,
+                  entry.displayName || entry.name || 'Anonymous',
+                  entry.score || 0,
+                  formatAccuracy(entry.accuracy),
+                  formatTime(entry.averageTime || entry.timeTaken || 0),
+                  new Date(entry.updatedAt || entry.completedAt || new Date()).toLocaleDateString()
+                ]);
+              });
+
+              setCsvData(csvData);
+            }
+          } catch (leaderboardErr) {
+            if (!controller.signal.aborted) {
+              console.error('Error fetching leaderboard:', leaderboardErr);
+              
+              if (leaderboardErr.response?.status === 401) {
+                setError('You need to be logged in to view the leaderboard.');
+              } else if (leaderboardErr.response?.status === 404) {
+                setError('Leaderboard not found for this test.');
+              } else {
+                setError('Failed to load leaderboard data. Please try again later.');
+              }
+              
+              // Try to retry the leaderboard fetch once
+              try {
+                const retryResponse = await apiToUse.get(`/api/leaderboard/test/${testId}`, {
+                  params: {
+                    page: currentPage,
+                    limit: rowsPerPage,
+                    timeRange
+                  },
+                  signal: controller.signal,
+                  timeout: 15000
+                });
+                
+                if (retryResponse.data && !controller.signal.aborted) {
+                  setError(''); // Clear error if retry succeeds
+                  
+                  // Use the same processing logic as the main handler
+                  console.log('Leaderboard API retry response:', retryResponse.data);
+                  
+                  // Handle both array format and object with leaderboard property
+                  const leaderboardEntries = Array.isArray(retryResponse.data) 
+                    ? retryResponse.data 
+                    : (retryResponse.data.leaderboard || []);
+                    
+                  // Get pagination info if available
+                  const totalPagesCount = retryResponse.data.totalPages || 
+                                         retryResponse.data.pagination?.totalPages || 
+                                         Math.ceil(leaderboardEntries.length / rowsPerPage) || 
+                                         1;
+                
+                  setLeaderboardData(leaderboardEntries);
+                  setFilteredData(leaderboardEntries);
+                  setTotalPages(totalPagesCount);
+                }
+              } catch (retryErr) {
+                if (!controller.signal.aborted) {
+                  console.error('Error retrying leaderboard fetch:', retryErr);
+                }
+              }
+            }
+          }
         }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+          setIsFetchingData(false);
+        }
       }
     };
 
-    fetchLeaderboard();
-  }, [user, testId, page, rowsPerPage, timeRange, navigate]);
+    // Start the data fetching
+    fetchData();
+
+    return () => {
+      // Clean up any pending requests when the component unmounts
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      setIsFetchingData(false);
+    };
+  }, [testId, timeRange, currentPage, rowsPerPage, authApi]);
 
   // Filter data based on search query
   useEffect(() => {
@@ -151,8 +273,9 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
     
     const lowercaseQuery = searchQuery.toLowerCase();
     const filtered = leaderboardData.filter(user => 
-      user.name?.toLowerCase().includes(lowercaseQuery) || 
-      user.level?.toLowerCase().includes(lowercaseQuery)
+      (user.name?.toLowerCase().includes(lowercaseQuery)) || 
+      (user.displayName?.toLowerCase().includes(lowercaseQuery)) ||
+      (user.level?.toLowerCase().includes(lowercaseQuery))
     );
     
     setFilteredData(filtered);
@@ -163,22 +286,60 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
     setFilteredData(leaderboardData);
   }, [leaderboardData]);
 
-  const handleChangePage = (event, newPage) => {
-    setPage(newPage);
-  };
-
-  const handleChangeRowsPerPage = (event) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
+  const handlePageChange = (event, page) => {
+    setCurrentPage(page);
   };
 
   const handleTimeRangeChange = (event) => {
     setTimeRange(event.target.value);
-    setPage(0);
+    setCurrentPage(0); // Reset to first page when changing time range
   };
 
   const handleSearchChange = (event) => {
     setSearchQuery(event.target.value);
+  };
+
+  const handleRowsPerPageChange = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setCurrentPage(0);
+  };
+
+  const formatTime = (seconds) => {
+    if (!seconds) return 'N/A';
+    
+    // Handle large time values by showing hours if needed
+    if (seconds >= 3600) {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const remainingSeconds = seconds % 60;
+      return `${hours}h ${minutes}m ${remainingSeconds}s`;
+    }
+    
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    
+    // If only seconds, just show seconds
+    if (minutes === 0) {
+      return `${remainingSeconds}s`;
+    }
+    
+    return `${minutes}m ${remainingSeconds}s`;
+  };
+
+  const formatAccuracy = (accuracy) => {
+    if (accuracy === null || accuracy === undefined || isNaN(accuracy)) return 'N/A';
+    return `${Math.round(accuracy)}%`;
+  };
+
+  const getDateDisplay = (dateString) => {
+    if (!dateString) return 'N/A';
+    const date = new Date(dateString);
+    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  const getCsvFilename = () => {
+    const currentDate = new Date().toLocaleDateString().replace(/\//g, '-');
+    return `${testTitle ? testTitle.replace(/\s+/g, '_') : 'test'}_leaderboard_${timeRange}_${currentDate}.csv`;
   };
 
   const getMedalColor = (rank) => {
@@ -207,14 +368,14 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
     const csvRows = [headers];
     
     filteredData.forEach((user, index) => {
-      const rank = index + 1 + (page * rowsPerPage);
+      const rank = index + 1 + (currentPage - 1) * rowsPerPage;
       csvRows.push([
         rank,
         user.name || 'Anonymous',
         user.level || 'Beginner',
         user.score,
-        user.accuracy ? `${user.accuracy}%` : 'N/A',
-        user.timeTaken || 'N/A',
+        formatAccuracy(user.accuracy),
+        formatTime(user.timeTaken || user.averageTime || 0),
         user.completedAt || 'N/A'
       ]);
     });
@@ -227,7 +388,7 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${testTitle || 'test'}_leaderboard_${timeRange}.csv`;
+    link.download = getCsvFilename();
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -447,6 +608,25 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
             <Typography variant="body1" color="text.secondary">
               No users found matching your criteria
             </Typography>
+            {process.env.NODE_ENV === 'development' && (
+              <Box sx={{ mt: 2, p: 2, bgcolor: alpha('#f8f9fa', 0.7), borderRadius: 1 }}>
+                <Typography variant="caption" component="div" sx={{ fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                  Debug Info:
+                  <br />
+                  API Status: {error ? 'Error: ' + error : 'Completed'}
+                  <br />
+                  Time Range: {timeRange}
+                  <br />
+                  Page: {currentPage}
+                  <br />
+                  Total Pages: {totalPages}
+                  <br />
+                  Filtered Data Length: {filteredData.length}
+                  <br />
+                  Search Query: {searchQuery || 'None'}
+                </Typography>
+              </Box>
+            )}
           </Box>
         ) : (
           <TableContainer sx={{ maxHeight: compact ? 400 : 600 }}>
@@ -537,11 +717,12 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
                 <AnimatePresence>
                   {displayedData.map((userData, index) => {
                     const isCurrentUser = user && userData._id === user._id;
-                    const rank = index + 1 + (page * rowsPerPage);
+                    const baseIndex = currentPage * rowsPerPage;
+                    const rank = baseIndex + index + 1;
                     
                     return (
                       <MotionTableRow
-                        key={userData._id}
+                        key={userData._id || `user-${index}`}
                         initial="hidden"
                         animate="visible"
                         exit="exit"
@@ -613,8 +794,8 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
                         <MotionTableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
                             <Avatar 
-                              src={userData.avatar}
-                              alt={userData.name}
+                              src={userData.avatar || userData.photoURL}
+                              alt={userData.name || userData.displayName}
                               sx={{ 
                                 width: 40, 
                                 height: 40,
@@ -622,7 +803,7 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
                                 boxShadow: '0 3px 10px rgba(0,0,0,0.1)'
                               }}
                             >
-                              {userData.name ? userData.name.charAt(0) : <PersonIcon />}
+                              {(userData.name || userData.displayName) ? (userData.name || userData.displayName).charAt(0) : <PersonIcon />}
                             </Avatar>
                             <Box sx={{ ml: 2 }}>
                               <Box sx={{ display: 'flex', alignItems: 'center' }}>
@@ -632,7 +813,7 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
                                     color: isCurrentUser ? theme.palette.primary.main : theme.palette.text.primary
                                   }}
                                 >
-                                  {userData.name || 'Anonymous'}
+                                  {userData.name || userData.displayName || 'Anonymous'}
                                 </Typography>
                                 {isCurrentUser && (
                                   <Chip 
@@ -704,7 +885,7 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
                                     theme.palette.error.main
                             }}
                           >
-                            {userData.accuracy ? `${userData.accuracy}%` : 'N/A'}
+                            {formatAccuracy(userData.accuracy)}
                           </Typography>
                         </MotionTableCell>
 
@@ -715,7 +896,7 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
                               color: theme.palette.text.primary
                             }}
                           >
-                            {userData.timeTaken || 'N/A'}
+                            {formatTime(userData.timeTaken || userData.averageTime)}
                           </Typography>
                         </MotionTableCell>
 
@@ -726,7 +907,7 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
                               color: theme.palette.text.secondary
                             }}
                           >
-                            {userData.completedAt ? new Date(userData.completedAt).toLocaleDateString() : 'N/A'}
+                            {(userData.completedAt || userData.updatedAt) ? new Date(userData.completedAt || userData.updatedAt).toLocaleDateString() : 'N/A'}
                           </Typography>
                         </MotionTableCell>
                       </MotionTableRow>
@@ -738,22 +919,31 @@ const TestLeaderboard = ({ testId, testTitle, compact = false }) => {
           </TableContainer>
         )}
         
-        {!compact && filteredData.length > 0 && (
-          <TablePagination
-            component="div"
-            count={totalItems}
-            page={page}
-            onPageChange={handleChangePage}
-            rowsPerPage={rowsPerPage}
-            onRowsPerPageChange={handleChangeRowsPerPage}
-            rowsPerPageOptions={[5, 10, 25, 50]}
-            sx={{ 
-              borderTop: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-              '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
-                color: theme.palette.text.secondary
-              }
-            }}
-          />
+        {!compact && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel>Rows per page</InputLabel>
+              <Select
+                value={rowsPerPage}
+                onChange={handleRowsPerPageChange}
+                label="Rows per page"
+              >
+                <MenuItem value={10}>10</MenuItem>
+                <MenuItem value={25}>25</MenuItem>
+                <MenuItem value={50}>50</MenuItem>
+                <MenuItem value={100}>100</MenuItem>
+              </Select>
+            </FormControl>
+            <TablePagination
+              component="div"
+              count={totalPages * rowsPerPage}
+              page={currentPage}
+              onPageChange={handlePageChange}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={handleRowsPerPageChange}
+              rowsPerPageOptions={[10, 25, 50, 100]}
+            />
+          </Box>
         )}
       </Paper>
     </Box>

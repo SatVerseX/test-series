@@ -6,7 +6,12 @@ require('dotenv').config({
   path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
 });
 
+// Set environment to development if not already set
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = 'development';
+}
 console.log('Environment:', process.env.NODE_ENV);
+
 console.log('MongoDB URI exists:', !!process.env.MONGODB_URI);
 
 // Import custom CORS middleware

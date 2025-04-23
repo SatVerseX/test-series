@@ -47,6 +47,9 @@ const TestSeriesDetail = () => {
   const [loading, setLoading] = useState(true);
   const [userProgress, setUserProgress] = useState(null);
   const [activeTest, setActiveTest] = useState(null);
+  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
+  const [testCompletionStatus, setTestCompletionStatus] = useState({});
 
   useEffect(() => {
     const fetchSeriesDetails = async () => {
@@ -54,15 +57,49 @@ const TestSeriesDetail = () => {
         const response = await api.get(`/api/test-series/${seriesId}`);
         setSeries(response.data);
         
-        // Instead of trying to fetch progress from a non-existent endpoint,
-        // let's create mock progress data for now
-        if (user && response.data) {
-          // Mock progress data based on the series
-          const mockProgress = {
-            completedTests: Math.floor(Math.random() * (response.data.totalTests || 0)),
-            averageScore: Math.floor(Math.random() * 100)
-          };
-          setUserProgress(mockProgress);
+        // Fetch completion status for each test if user is logged in
+        if (user && response.data.tests) {
+          const completionStatus = {};
+          await Promise.all(response.data.tests.map(async (test) => {
+            try {
+              const statusResponse = await api.get(`/api/tests/${test._id}/check-completion`);
+              completionStatus[test._id] = {
+                hasCompleted: statusResponse.data.hasCompleted === true,
+                score: statusResponse.data.score,
+                totalMarks: statusResponse.data.totalMarks,
+                completedAt: statusResponse.data.completedAt,
+                percentageScore: statusResponse.data.percentageScore
+              };
+            } catch (error) {
+              console.error(`Error checking completion status for test ${test._id}:`, error);
+              completionStatus[test._id] = { hasCompleted: false };
+            }
+          }));
+          setTestCompletionStatus(completionStatus);
+
+          // Calculate real progress data
+          const completedTests = response.data.tests.filter(test => 
+            completionStatus[test._id]?.hasCompleted === true &&
+            completionStatus[test._id]?.score !== undefined &&
+            completionStatus[test._id]?.score !== null &&
+            completionStatus[test._id]?.completedAt
+          ).length;
+
+          setUserProgress({
+            completedTests,
+            totalTests: response.data.tests.length,
+            progress: completedTests / response.data.tests.length * 100
+          });
+        }
+
+        // Check if user is subscribed to this series
+        if (user) {
+          try {
+            const subscriptionResponse = await api.get(`/api/users/subscribed/test-series/${seriesId}`);
+            setIsSubscribed(subscriptionResponse.data.isSubscribed);
+          } catch (subscriptionError) {
+            console.error('Error checking subscription status:', subscriptionError);
+          }
         }
       } catch (error) {
         console.error('Error fetching series details:', error);
@@ -81,6 +118,39 @@ const TestSeriesDetail = () => {
 
   const handleViewLeaderboard = () => {
     navigate(`/test-series/${seriesId}/leaderboard`);
+  };
+
+  const handleViewResult = (testId, attemptId) => {
+    navigate(`/test-results/${testId}/attempt/${attemptId}`);
+  };
+
+  const handleSubscribe = async () => {
+    if (!user) {
+      toast.error('Please login to subscribe to this test series');
+      navigate('/login');
+      return;
+    }
+
+    setSubscribing(true);
+    try {
+      const response = await api.post(`/api/users/subscribe/test-series/${seriesId}`);
+      
+      if (response.data.isSubscribed) {
+        setIsSubscribed(true);
+        toast.success('Successfully subscribed to test series!');
+      }
+    } catch (error) {
+      console.error('Error subscribing to test series:', error);
+      if (error.response?.status === 409) {
+        // Already subscribed
+        setIsSubscribed(true);
+        toast.info('You are already subscribed to this test series');
+      } else {
+        toast.error('Failed to subscribe to test series');
+      }
+    } finally {
+      setSubscribing(false);
+    }
   };
 
   if (loading) {
@@ -112,7 +182,7 @@ const TestSeriesDetail = () => {
   }
 
   const progressPercentage = userProgress ? 
-    Math.round((userProgress.completedTests / series.totalTests) * 100) : 0;
+    Math.round((userProgress.completedTests / (userProgress.totalTests || 1)) * 100) : 0;
 
   return (
     <Container maxWidth="xl">
@@ -161,8 +231,8 @@ const TestSeriesDetail = () => {
             onClick={() => navigate(-1)}
             sx={{
               position: 'absolute',
-              top: 20,
-              left: 20,
+              top: { xs: 10, md: 20 },
+              left: { xs: 10, md: 20 },
               color: 'white',
               bgcolor: alpha('#fff', 0.15),
               backdropFilter: 'blur(10px)',
@@ -178,7 +248,7 @@ const TestSeriesDetail = () => {
           </IconButton>
 
           <Grid container spacing={4} alignItems="center">
-            <Grid item xs={12}>
+            <Grid item xs={12} sx={{ pl: { xs: 7, md: 3 } }}>
               <motion.div
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -192,7 +262,11 @@ const TestSeriesDetail = () => {
                     fontWeight: 800,
                     textShadow: '0 2px 15px rgba(0,0,0,0.3)',
                     mb: 2,
-                    letterSpacing: '-0.5px'
+                    letterSpacing: '-0.5px',
+                    fontSize: { xs: '1.8rem', sm: '2.2rem', md: '2.5rem' },
+                    ml: { xs: '10px', md: 0 },
+                    paddingLeft: { xs: '10px', md: 0 },
+                    paddingTop: { xs: 1, md: 0 }
                   }}
                 >
                   {series.title}
@@ -444,55 +518,140 @@ const TestSeriesDetail = () => {
                     </Box>
                   </Box>
 
-                  {test.completed ? (
-                    <Box 
-                      sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        mt: 2,
-                        p: 1.5,
-                        borderRadius: 2,
-                        bgcolor: alpha(theme.palette.success.main, 0.1)
-                      }}
-                    >
-                      <CheckCircleIcon sx={{ color: theme.palette.success.main, mr: 1 }} />
-                      <Box>
-                        <Typography color="success.main" sx={{ fontWeight: 600 }}>
-                          Completed
-                        </Typography>
-                        <Typography variant="body2" color="success.main">
-                          Score: {test.score}%
-                        </Typography>
+                  {testCompletionStatus[test._id]?.hasCompleted ? (
+                    <>
+                      <Box 
+                        sx={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          mt: 2,
+                          p: 1.5,
+                          borderRadius: 2,
+                          bgcolor: alpha(theme.palette.success.main, 0.1)
+                        }}
+                      >
+                        <CheckCircleIcon sx={{ color: theme.palette.success.main, mr: 1 }} />
+                        <Box>
+                          <Typography color="success.main" sx={{ fontWeight: 600 }}>
+                            Completed
+                          </Typography>
+                          <Stack direction="row" spacing={2}>
+                            <Typography variant="body2" color="success.main">
+                              Score: {testCompletionStatus[test._id]?.score || 0}/{testCompletionStatus[test._id]?.totalMarks || 0}
+                            </Typography>
+                            <Typography variant="body2" color="success.main">
+                              ({testCompletionStatus[test._id]?.percentageScore || 0}%)
+                            </Typography>
+                          </Stack>
+                        </Box>
                       </Box>
-                    </Box>
-                  ) : (
-                    <Button
-                      fullWidth
-                      variant="outlined"
-                      color="primary"
-                      onClick={() => handleStartTest(test._id)}
-                      startIcon={test.locked ? <LockIcon /> : <PlayArrowIcon />}
-                      disabled={test.locked}
-                      component={motion.button}
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      sx={{
-                        mt: 2,
-                        borderRadius: 3,
-                        textTransform: 'none',
-                        py: 1.5,
-                        borderWidth: 2,
-                        fontSize: '1rem',
-                        fontWeight: 600,
-                        '&:hover': {
+                      <Button
+                        fullWidth
+                        variant="outlined"
+                        color="success"
+                        onClick={() => handleViewResult(test._id, testCompletionStatus[test._id].attemptId)}
+                        startIcon={<CheckCircleIcon />}
+                        component={motion.button}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        sx={{
+                          mt: 2,
+                          borderRadius: 3,
+                          textTransform: 'none',
+                          py: 1.5,
                           borderWidth: 2,
-                          transform: 'translateY(-2px)',
-                          boxShadow: `0 8px 20px ${alpha(theme.palette.primary.main, 0.2)}`
-                        }
-                      }}
-                    >
-                      {test.locked ? 'Locked' : 'Start Test'}
-                    </Button>
+                          fontSize: '1rem',
+                          fontWeight: 600,
+                          '&:hover': {
+                            borderWidth: 2,
+                            transform: 'translateY(-2px)',
+                            boxShadow: `0 8px 20px ${alpha(theme.palette.success.main, 0.2)}`
+                          }
+                        }}
+                      >
+                        View Result
+                      </Button>
+                    </>
+                  ) : (
+                    <Stack spacing={2} sx={{ mt: 2 }}>
+                      {isSubscribed ? (
+                        <Button
+                          fullWidth
+                          variant="outlined"
+                          color="primary"
+                          onClick={() => handleStartTest(test._id)}
+                          startIcon={test.locked ? <LockIcon /> : <PlayArrowIcon />}
+                          disabled={test.locked}
+                          component={motion.button}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          sx={{
+                            borderRadius: 3,
+                            textTransform: 'none',
+                            py: 1.5,
+                            borderWidth: 2,
+                            fontSize: '1rem',
+                            fontWeight: 600,
+                            '&:hover': {
+                              borderWidth: 2,
+                              transform: 'translateY(-2px)',
+                              boxShadow: `0 8px 20px ${alpha(theme.palette.primary.main, 0.2)}`
+                            }
+                          }}
+                        >
+                          {test.locked ? 'Locked' : 'Start Test'}
+                        </Button>
+                      ) : null}
+
+                      {!isSubscribed ? (
+                        <Button
+                          fullWidth
+                          variant="contained"
+                          color="success"
+                          onClick={handleSubscribe}
+                          disabled={subscribing}
+                          startIcon={<StarIcon />}
+                          component={motion.button}
+                          whileHover={{ scale: 1.02 }}
+                          whileTap={{ scale: 0.98 }}
+                          sx={{
+                            borderRadius: 3,
+                            textTransform: 'none',
+                            py: 1.5,
+                            fontSize: '1rem',
+                            fontWeight: 600,
+                            background: `linear-gradient(90deg, ${theme.palette.success.main}, ${theme.palette.success.dark})`,
+                            '&:hover': {
+                              transform: 'translateY(-2px)',
+                              boxShadow: `0 8px 20px ${alpha(theme.palette.success.main, 0.3)}`
+                            }
+                          }}
+                        >
+                          {subscribing ? 'Subscribing...' : 'Subscribe to Start Test'}
+                        </Button>
+                      ) : (
+                        <Button
+                          fullWidth
+                          variant="contained"
+                          color="success"
+                          startIcon={<CheckCircleIcon />}
+                          disabled
+                          sx={{
+                            borderRadius: 3,
+                            textTransform: 'none',
+                            py: 1.5,
+                            fontSize: '1rem',
+                            fontWeight: 600,
+                            background: alpha(theme.palette.success.main, 0.9),
+                            '&:hover': {
+                              background: alpha(theme.palette.success.main, 0.9)
+                            }
+                          }}
+                        >
+                          Subscribed
+                        </Button>
+                      )}
+                    </Stack>
                   )}
                 </CardContent>
               </Card>

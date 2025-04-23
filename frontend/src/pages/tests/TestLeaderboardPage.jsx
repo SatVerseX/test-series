@@ -16,7 +16,12 @@ import {
   Card,
   CardContent,
   alpha,
-  useTheme
+  useTheme,
+  Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem
 } from '@mui/material';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import AssignmentIcon from '@mui/icons-material/Assignment';
@@ -26,407 +31,312 @@ import PeopleIcon from '@mui/icons-material/People';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { useAuth } from '../../contexts/AuthContext';
 import TestLeaderboard from '../../components/leaderboard/TestLeaderboard';
 import { toast } from 'react-hot-toast';
+import { Link as RouterLink } from 'react-router-dom';
 
 const TestLeaderboardPage = () => {
   const { seriesId, testId } = useParams();
-  const navigate = useNavigate();
-  const theme = useTheme();
   const { user, api } = useAuth();
   const [testData, setTestData] = useState(null);
   const [seriesData, setSeriesData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [stats, setStats] = useState({
-    participantsCount: 0,
-    averageScore: 0,
-    averageAccuracy: 0,
-    averageTime: '0m'
-  });
+  const [userTestAttempt, setUserTestAttempt] = useState(null);
+  const [showSelector, setShowSelector] = useState(!testId);
+  const [availableTests, setAvailableTests] = useState([]);
+  const [selectedTestId, setSelectedTestId] = useState(testId || '');
+  const [selectedTest, setSelectedTest] = useState(null);
+  const navigate = useNavigate();
 
-  // Fetch test and series details
   useEffect(() => {
-    const fetchTestDetails = async () => {
+    const fetchAvailableTests = async () => {
       try {
-        setLoading(true);
-        
-        // Fetch test details
-        const testResponse = await api.get(`/api/test-series/${seriesId}/test/${testId}`);
-        
-        if (testResponse.data) {
-          setTestData(testResponse.data);
+        if (!testId && user) {
+          setLoading(true);
+          // Fetch the user's stats which includes test attempts
+          const response = await api.get(`/api/users/${user.firebaseId}/stats`);
           
-          // Get test series info
-          try {
-            const seriesResponse = await api.get(`/api/test-series/${seriesId}`);
-            if (seriesResponse.data) {
-              setSeriesData(seriesResponse.data);
-            }
-          } catch (seriesErr) {
-            console.warn('Could not fetch series details:', seriesErr);
-          }
-          
-          // Try to get stats if available
-          try {
-            const statsResponse = await api.get(`/api/test-series/${seriesId}/test/${testId}/stats`);
-            if (statsResponse.data) {
-              setStats(statsResponse.data);
-            }
-          } catch (statsErr) {
-            console.warn('Stats API not implemented or failed:', statsErr);
+          if (response.data && Array.isArray(response.data.recentTests)) {
+            // Get unique tests from attempts
+            const uniqueTests = [];
+            const testIds = new Set();
+            
+            response.data.recentTests.forEach(test => {
+              if (!testIds.has(test.testId) && test.status === 'completed') {
+                testIds.add(test.testId);
+                uniqueTests.push({
+                  id: test.testId,
+                  title: test.title || `Test ${test.testId}`,
+                  date: new Date(test.completedAt).toLocaleDateString()
+                });
+              }
+            });
+            
+            setAvailableTests(uniqueTests);
+            setShowSelector(true);
           }
         }
       } catch (err) {
-        console.error('Error fetching test details:', err);
-        setError('Failed to load test details');
-        toast.error('Could not load test details');
+        console.error('Error fetching available tests:', err);
+        setError('Failed to load your completed tests. Please try again later.');
       } finally {
         setLoading(false);
       }
     };
 
-    if (seriesId && testId) {
-      fetchTestDetails();
-    }
-  }, [api, seriesId, testId]);
+    fetchAvailableTests();
+  }, [user, testId, api]);
 
-  const handleBackToSeries = () => {
-    navigate(`/test-series/${seriesId}`);
+  useEffect(() => {
+    // Reset when testId changes
+    if (testId) {
+      setSelectedTestId(testId);
+      setShowSelector(false);
+    }
+  }, [testId]);
+
+  useEffect(() => {
+    const fetchTestDetails = async () => {
+      // Only fetch if we have a test ID (either from URL or selected)
+      const currentTestId = testId || selectedTestId;
+      if (!currentTestId) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        setError(null);
+
+        // Fetch test details
+        const testResponse = await api.get(`/api/tests/${currentTestId}`);
+        if (testResponse.data) {
+          setTestData(testResponse.data);
+          setSelectedTest(testResponse.data);
+        }
+
+        // If we have a seriesId, fetch series details
+        if (seriesId) {
+          const seriesResponse = await api.get(`/api/test-series/${seriesId}`);
+          if (seriesResponse.data) {
+            setSeriesData(seriesResponse.data);
+          }
+        }
+
+        // Fetch user's attempt for this test if logged in
+        if (user) {
+          try {
+            const userAttemptResponse = await api.get(`/api/tests/${currentTestId}/user-attempt`);
+            if (userAttemptResponse.data) {
+              setUserTestAttempt(userAttemptResponse.data);
+            }
+          } catch (attemptErr) {
+            // It's okay if the user hasn't attempted this test yet
+            console.log('User has not attempted this test yet');
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching test details:', err);
+        setError(err.response?.data?.error || 'Failed to load test details. Please try again later.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchTestDetails();
+  }, [testId, seriesId, user, api, selectedTestId]);
+
+  const handleTestSelect = (event) => {
+    const newTestId = event.target.value;
+    setSelectedTestId(newTestId);
+    
+    // Update URL to include the selected test
+    if (newTestId) {
+      navigate(`/test-leaderboard/${newTestId}`);
+    }
   };
 
-  const handleBackToSeriesLeaderboard = () => {
-    navigate(`/test-series/${seriesId}/leaderboard`);
+  // Format time in a readable way (same as in TestLeaderboard)
+  const formatTime = (seconds) => {
+    if (!seconds) return 'N/A';
+    
+    // Handle large time values by showing hours if needed
+    if (seconds >= 3600) {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const remainingSeconds = seconds % 60;
+      return `${hours}h ${minutes}m ${remainingSeconds}s`;
+    }
+    
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    
+    // If only seconds, just show seconds
+    if (minutes === 0) {
+      return `${remainingSeconds}s`;
+    }
+    
+    return `${minutes}m ${remainingSeconds}s`;
   };
 
   if (loading) {
     return (
-      <Container sx={{ py: 4, textAlign: 'center' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
         <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (!testId && !selectedTestId && showSelector) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Typography variant="h4" component="h1" align="center" gutterBottom>
+          Test Leaderboard
+        </Typography>
+        
+        {error && (
+          <Alert severity="error" sx={{ mb: 3 }}>
+            {error}
+          </Alert>
+        )}
+
+        {availableTests.length > 0 ? (
+          <Box sx={{ maxWidth: 600, mx: 'auto', my: 4 }}>
+            <Typography variant="h6" gutterBottom>
+              Select a completed test to view its leaderboard
+            </Typography>
+            <FormControl fullWidth sx={{ mb: 3 }}>
+              <InputLabel id="test-selector-label">Select Test</InputLabel>
+              <Select
+                labelId="test-selector-label"
+                value={selectedTestId}
+                onChange={handleTestSelect}
+                label="Select Test"
+              >
+                <MenuItem value="" disabled>
+                  <em>Select a test</em>
+                </MenuItem>
+                {availableTests.map(test => (
+                  <MenuItem key={test.id} value={test.id}>
+                    {test.title} (completed on {test.date})
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              Only tests you have completed will appear in this list. Complete more tests to view their leaderboards.
+            </Typography>
+          </Box>
+        ) : (
+          <Box sx={{ textAlign: 'center', py: 4 }}>
+            <Typography variant="h6" gutterBottom>
+              No completed tests found
+            </Typography>
+            <Typography variant="body1" paragraph>
+              You need to complete at least one test before you can view leaderboards.
+            </Typography>
+            <Button 
+              variant="contained" 
+              color="primary" 
+              component={Link} 
+              to="/tests"
+              startIcon={<PlayArrowIcon />}
+            >
+              Take a Test Now
+            </Button>
+          </Box>
+        )}
       </Container>
     );
   }
 
-  if (error || !testData) {
+  if (error) {
     return (
-      <Container sx={{ py: 4, textAlign: 'center' }}>
-        <Typography color="error" gutterBottom>{error || 'Test not found'}</Typography>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={() => navigate(`/test-series/${seriesId}`)}
-          startIcon={<ArrowBackIcon />}
-          sx={{ mt: 2 }}
-        >
-          Back to Test Series
-        </Button>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Alert severity="error">{error}</Alert>
+        <Box sx={{ mt: 2, textAlign: 'center' }}>
+          <Button variant="outlined" component={Link} to="/tests">
+            Return to Tests
+          </Button>
+        </Box>
       </Container>
     );
   }
+
+  // Determine which test ID to use - either from URL or selected
+  const effectiveTestId = testId || selectedTestId;
+  const effectiveTestTitle = testData?.title || selectedTest?.title || 'Test Leaderboard';
 
   return (
     <Container maxWidth="lg" sx={{ py: 4 }}>
-      {/* Breadcrumbs navigation */}
-      <Breadcrumbs 
-        separator={<NavigateNextIcon fontSize="small" />} 
-        aria-label="breadcrumb"
-        sx={{ mb: 3 }}
-      >
-        <Link 
-          color="inherit" 
-          href="#" 
-          onClick={(e) => {
-            e.preventDefault();
-            navigate('/');
-          }}
-          sx={{ 
-            textDecoration: 'none',
-            display: 'flex',
-            alignItems: 'center' 
-          }}
-        >
-          Home
+      {/* Breadcrumb navigation */}
+      <Breadcrumbs separator="›" aria-label="breadcrumb" sx={{ mb: 3 }}>
+        <Link underline="hover" color="inherit" component={RouterLink} to="/dashboard">
+          Dashboard
         </Link>
-        <Link 
-          color="inherit" 
-          href="#" 
-          onClick={(e) => {
-            e.preventDefault();
-            navigate('/test-series');
-          }}
-          sx={{ 
-            textDecoration: 'none',
-            display: 'flex',
-            alignItems: 'center' 
-          }}
-        >
-          Test Series
+        <Link underline="hover" color="inherit" component={RouterLink} to="/tests">
+          Tests
         </Link>
-        <Link 
-          color="inherit" 
-          href="#" 
-          onClick={(e) => {
-            e.preventDefault();
-            navigate(`/test-series/${seriesId}`);
-          }}
-          sx={{ 
-            textDecoration: 'none',
-            display: 'flex',
-            alignItems: 'center' 
-          }}
-        >
-          {seriesData?.title || 'Test Series'}
-        </Link>
-        <Link 
-          color="inherit" 
-          href="#" 
-          onClick={(e) => {
-            e.preventDefault();
-            navigate(`/test-series/${seriesId}/leaderboard`);
-          }}
-          sx={{ 
-            textDecoration: 'none',
-            display: 'flex',
-            alignItems: 'center' 
-          }}
-        >
-          Leaderboard
-        </Link>
-        <Typography color="text.primary">{testData.title}</Typography>
+        {seriesData && (
+          <Link
+            underline="hover"
+            color="inherit"
+            component={RouterLink}
+            to={`/test-series/${seriesId}`}
+          >
+            {seriesData.title}
+          </Link>
+        )}
+        <Typography color="text.primary">{effectiveTestTitle}</Typography>
       </Breadcrumbs>
 
-      {/* Test header with info */}
-      <Paper 
-        elevation={3}
-        sx={{ 
-          p: 3, 
-          mb: 4, 
-          borderRadius: 3,
-          background: theme.palette.mode === 'dark' 
-            ? `linear-gradient(145deg, ${alpha('#1E1E2E', 0.9)}, ${alpha('#1E1E2E', 0.7)})` 
-            : `linear-gradient(145deg, #ffffff, ${alpha('#f8f9fa', 0.7)})`,
-          backdropFilter: 'blur(10px)',
-          border: `1px solid ${alpha(theme.palette.divider, 0.1)}`,
-        }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: { xs: 2, md: 0 } }}>
-            <Avatar 
-              variant="rounded"
-              sx={{ 
-                width: 80, 
-                height: 80, 
-                mr: 2,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                bgcolor: theme.palette.primary.main,
-                borderRadius: 2
-              }}
-            >
-              <AssignmentTurnedInIcon fontSize="large" />
-            </Avatar>
-            <Box>
-              <Typography variant="h4" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-                {testData.title}
-              </Typography>
-              {seriesData && (
-                <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-                  {seriesData.title}
-                </Typography>
-              )}
-              <Box sx={{ display: 'flex', mt: 1 }}>
-                <Chip 
-                  icon={<AssignmentTurnedInIcon fontSize="small" />}
-                  label={`${testData.questions?.length || 0} Questions`} 
-                  size="small"
-                  sx={{ mr: 1 }}
-                />
-                {testData.duration && (
-                  <Chip 
-                    icon={<AccessTimeOutlinedIcon fontSize="small" />}
-                    label={`${testData.duration} mins`} 
-                    size="small"
-                    sx={{ mr: 1 }}
-                  />
-                )}
-                <Chip 
-                  icon={<PeopleIcon fontSize="small" />}
-                  label={`${stats.participantsCount} Participants`} 
-                  size="small"
-                  color="primary"
-                />
-              </Box>
-            </Box>
+      <Paper elevation={2} sx={{ p: 3, mb: 4 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          {effectiveTestTitle} - Leaderboard
+        </Typography>
+        
+        {userTestAttempt && (
+          <Box sx={{ mb: 4 }}>
+            <Typography variant="h6" gutterBottom sx={{ color: 'primary.main' }}>
+              Your Performance
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} sm={4}>
+                <Paper elevation={1} sx={{ p: 2, bgcolor: 'background.paper', textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Your Score</Typography>
+                  <Typography variant="h4" color="primary.main">
+                    {userTestAttempt.score || 0}
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Paper elevation={1} sx={{ p: 2, bgcolor: 'background.paper', textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Accuracy</Typography>
+                  <Typography variant="h4" color="success.main">
+                    {userTestAttempt.accuracy ? `${userTestAttempt.accuracy}%` : 'N/A'}
+                  </Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Paper elevation={1} sx={{ p: 2, bgcolor: 'background.paper', textAlign: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Time Taken</Typography>
+                  <Typography variant="h4" color="info.main">
+                    {formatTime(userTestAttempt.timeTaken)}
+                  </Typography>
+                </Paper>
+              </Grid>
+            </Grid>
           </Box>
-          <Box>
-            <Button
-              variant="outlined"
-              color="primary"
-              onClick={handleBackToSeriesLeaderboard}
-              startIcon={<ArrowBackIcon />}
-              sx={{ borderRadius: 2, mr: 1 }}
-            >
-              Series Leaderboard
-            </Button>
-            <Button
-              variant="outlined"
-              color="primary"
-              onClick={handleBackToSeries}
-              startIcon={<ArrowBackIcon />}
-              sx={{ borderRadius: 2 }}
-            >
-              Back to Series
-            </Button>
-          </Box>
-        </Box>
+        )}
+
+        <TestLeaderboard 
+          testId={effectiveTestId} 
+          testTitle={effectiveTestTitle}
+        />
       </Paper>
-
-      {/* Performance Stats Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ 
-            borderRadius: 3,
-            background: 'linear-gradient(145deg, rgba(76,175,80,0.08), rgba(139,195,74,0.03))',
-            border: `1px solid ${alpha(theme.palette.success.main, 0.2)}`,
-            boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
-            transition: 'all 0.3s ease',
-            '&:hover': {
-              transform: 'translateY(-5px)',
-              boxShadow: '0 6px 20px rgba(0,0,0,0.1)'
-            }
-          }}>
-            <CardContent>
-              <Typography variant="overline" sx={{ color: theme.palette.text.secondary }}>
-                Participants
-              </Typography>
-              <Typography variant="h4" sx={{ fontWeight: 'bold', color: theme.palette.primary.main }}>
-                {stats.participantsCount}
-              </Typography>
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                color: theme.palette.text.secondary,
-                mt: 1
-              }}>
-                <PeopleIcon fontSize="small" sx={{ mr: 0.5 }} />
-                <Typography variant="body2">
-                  Active learners
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ 
-            borderRadius: 3,
-            background: 'linear-gradient(145deg, rgba(33,150,243,0.08), rgba(3,169,244,0.03))',
-            border: `1px solid ${alpha(theme.palette.info.main, 0.2)}`,
-            boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
-            transition: 'all 0.3s ease',
-            '&:hover': {
-              transform: 'translateY(-5px)',
-              boxShadow: '0 6px 20px rgba(0,0,0,0.1)'
-            }
-          }}>
-            <CardContent>
-              <Typography variant="overline" sx={{ color: theme.palette.text.secondary }}>
-                Average Score
-              </Typography>
-              <Typography variant="h4" sx={{ fontWeight: 'bold', color: theme.palette.primary.main }}>
-                {stats.averageScore}
-              </Typography>
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                color: theme.palette.text.secondary,
-                mt: 1
-              }}>
-                <BarChartIcon fontSize="small" sx={{ mr: 0.5 }} />
-                <Typography variant="body2">
-                  Points per test
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ 
-            borderRadius: 3,
-            background: 'linear-gradient(145deg, rgba(255,152,0,0.08), rgba(255,193,7,0.03))',
-            border: `1px solid ${alpha(theme.palette.warning.main, 0.2)}`,
-            boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
-            transition: 'all 0.3s ease',
-            '&:hover': {
-              transform: 'translateY(-5px)',
-              boxShadow: '0 6px 20px rgba(0,0,0,0.1)'
-            }
-          }}>
-            <CardContent>
-              <Typography variant="overline" sx={{ color: theme.palette.text.secondary }}>
-                Average Accuracy
-              </Typography>
-              <Typography variant="h4" sx={{ fontWeight: 'bold', color: theme.palette.primary.main }}>
-                {stats.averageAccuracy}%
-              </Typography>
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                color: theme.palette.text.secondary,
-                mt: 1
-              }}>
-                <CheckCircleIcon fontSize="small" sx={{ mr: 0.5 }} />
-                <Typography variant="body2">
-                  Correct answers
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <Card sx={{ 
-            borderRadius: 3,
-            background: 'linear-gradient(145deg, rgba(63,81,181,0.08), rgba(103,58,183,0.03))',
-            border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
-            boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
-            transition: 'all 0.3s ease',
-            '&:hover': {
-              transform: 'translateY(-5px)',
-              boxShadow: '0 6px 20px rgba(0,0,0,0.1)'
-            }
-          }}>
-            <CardContent>
-              <Typography variant="overline" sx={{ color: theme.palette.text.secondary }}>
-                Average Time
-              </Typography>
-              <Typography variant="h4" sx={{ fontWeight: 'bold', color: theme.palette.primary.main }}>
-                {stats.averageTime}
-              </Typography>
-              <Box sx={{
-                display: 'flex', 
-                alignItems: 'center', 
-                color: theme.palette.text.secondary,
-                mt: 1
-              }}>
-                <AccessTimeOutlinedIcon fontSize="small" sx={{ mr: 0.5 }} />
-                <Typography variant="body2">
-                  Per test
-                </Typography>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Test Leaderboard */}
-      <TestLeaderboard 
-        seriesId={seriesId} 
-        testId={testId}
-        testTitle={testData.title}
-        testData={testData}
-      />
     </Container>
   );
 };

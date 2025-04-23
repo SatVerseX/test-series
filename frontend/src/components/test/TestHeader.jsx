@@ -14,7 +14,8 @@ import {
   Fullscreen as FullscreenIcon,
   FullscreenExit as FullscreenExitIcon,
   Menu as MenuIcon,
-  AccessTime as TimeIcon
+  AccessTime as TimeIcon,
+  ArrowBack as ArrowBackIcon
 } from '@mui/icons-material';
 
 const TestHeader = ({ 
@@ -58,37 +59,54 @@ const TestHeader = ({
       width: '100%',
       gap: 1,
       flexDirection: isMobile ? 'column' : 'row',
-      py: isMobile ? 1 : 0
+      py: isMobile ? 1.5 : 0
     }}>
       {/* Left section */}
       <Box sx={{ 
         display: 'flex', 
         alignItems: 'center', 
-        gap: 1,
+        gap: isMobile ? '10px' : 1,
         width: isMobile ? '100%' : 'auto',
-        justifyContent: isMobile ? 'space-between' : 'flex-start'
+        justifyContent: isMobile ? 'flex-start' : 'flex-start',
+        pl: isMobile ? 1 : 0,
+        pr: isMobile ? 1 : 0
       }}>
         <IconButton
           onClick={onToggleSidebar}
           size={isMobile ? "medium" : "small"}
+          sx={{
+            mr: isMobile ? '10px' : 0,
+            backgroundColor: isMobile ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+            '&:hover': {
+              backgroundColor: 'rgba(255, 255, 255, 0.2)'
+            }
+          }}
         >
-          <MenuIcon />
+          <ArrowBackIcon />
         </IconButton>
         <Typography
-          variant={isMobile ? "subtitle1" : "h6"}
+          variant={isMobile ? "h6" : "h6"}
           sx={{
             fontWeight: 'bold',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            maxWidth: { xs: '200px', sm: '300px', md: '400px' }
+            maxWidth: { xs: '220px', sm: '300px', md: '400px' },
+            flexGrow: 1,
+            ml: isMobile ? 0.5 : 0,
+            fontSize: isMobile ? '1.1rem' : undefined
           }}
         >
           {title}
         </Typography>
 
         {isMobile && (
-          <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <Box sx={{ 
+            display: 'flex', 
+            gap: 0.5,
+            ml: 'auto',
+            mr: 1
+          }}>
             <Tooltip title={darkMode ? "Light Mode" : "Dark Mode"}>
               <IconButton onClick={onToggleDarkMode} color="inherit" size="small">
                 {darkMode ? <LightModeIcon /> : <DarkModeIcon />}
@@ -123,6 +141,7 @@ const TestHeader = ({
           width: isMobile ? '100%' : 'auto',
           height: 'auto',
           borderRadius: isMobile ? 1 : 16,
+          mt: isMobile ? 1 : 0,
           '& .MuiChip-label': {
             px: 1
           }

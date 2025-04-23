@@ -22,9 +22,9 @@ const SectionSidebar = ({ sections, currentSection, onSelectSection }) => {
   }
 
   return (
-    <Box sx={{ height: '100%', overflow: 'auto' }}>
-      <Paper elevation={0} sx={{ p: 2 }}>
-        <Typography variant="h6" gutterBottom>
+    <Box sx={{ height: '100%', overflow: 'auto', mt: 2.5 }}>
+      <Paper elevation={1} sx={{ p: 2, borderRadius: 2 }}>
+        <Typography variant="subtitle1" fontWeight="bold" sx={{ mb: 1 }}>
           Sections
         </Typography>
         <List>

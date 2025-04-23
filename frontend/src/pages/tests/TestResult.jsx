@@ -232,14 +232,17 @@ const TestResult = () => {
       });
       
       const totalQuestions = test.questions.length;
+      const totalMarks = attempt.totalMarks || test.totalMarks || test.questions.reduce((sum, q) => sum + q.marks, 0);
+      const percentageScore = Math.round((attempt.score / totalMarks) * 100);
+      
       return {
         totalQuestions,
-        totalMarks: test.totalMarks || totalQuestions,
+        totalMarks,
         correctCount: attempt.correctAnswers,
         incorrectCount: totalQuestions - attempt.correctAnswers,
         unattemptedCount: 0,
-        obtainedMarks: Math.round((attempt.score / 100) * (test.totalMarks || totalQuestions)),
-        percentageScore: attempt.score,
+        obtainedMarks: attempt.score,
+        percentageScore,
         passed: attempt.isPassed || attempt.passed
       };
     }
@@ -574,62 +577,19 @@ const TestResult = () => {
                         justifyContent: 'center'
                       }}>
                         <Typography variant="h6" gutterBottom>
-                          Final Score
+                          Marks Obtained
                         </Typography>
                         <Typography variant="h2" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
                           <CountUp 
-                            end={stats.percentageScore} 
+                            end={stats.obtainedMarks} 
                             duration={2.5} 
-                            suffix="%" 
-                            decimals={1}
-                            decimal="."
+                            suffix={`/${stats.totalMarks}`} 
+                            decimals={0}
                           />
                         </Typography>
-                      </Box>
-                    </Grid>
-                    
-                    <Grid item xs={12} sm={6}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Box sx={{ width: 100, height: 100 }}>
-                          <PieChart
-                            data={[
-                              { title: 'Correct', value: stats.correctCount, color: '#4caf50' },
-                              { title: 'Incorrect', value: stats.incorrectCount, color: '#f44336' },
-                            ]}
-                            lineWidth={20}
-                            paddingAngle={5}
-                            rounded
-                            animate
-                            animationDuration={1000}
-                            label={({ dataEntry }) => `${Math.round(dataEntry.percentage)}%`}
-                            labelStyle={{
-                              fontSize: '10px',
-                              fontFamily: 'sans-serif',
-                              fill: '#fff',
-                              fontWeight: 'bold',
-                            }}
-                            labelPosition={70}
-                            startAngle={-90}
-                          />
-                        </Box>
-                        <Box>
-                          <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'primary.main' }}>
-                            <CountUp 
-                              end={stats.obtainedMarks} 
-                              duration={2} 
-                            />
-                            /{stats.totalMarks}
-                          </Typography>
-                          <Typography variant="h5">
-                            <CountUp 
-                              end={stats.percentageScore} 
-                              duration={2.5} 
-                              suffix="%" 
-                              decimals={1}
-                              decimal="."
-                            />
-                          </Typography>
-                        </Box>
+                        <Typography variant="body1" color="text.secondary" sx={{ mt: 1 }}>
+                          ({stats.percentageScore}%)
+                        </Typography>
                       </Box>
                     </Grid>
                     

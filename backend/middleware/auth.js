@@ -3,6 +3,11 @@ const User = require('../models/User');
 
 // Verify Firebase token
 const verifyToken = async (req, res, next) => {
+  // Skip auth check for OPTIONS requests (CORS preflight)
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+  
   try {
     console.log('=== Starting Token Verification ===');
     console.log('Request path:', req.path);

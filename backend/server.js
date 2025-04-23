@@ -41,20 +41,18 @@ const allowedOrigins = [
 ];
 
 // Apply CORS middleware before any route handling
-app.use(function(req, res, next) {
+app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (allowedOrigins.includes(origin)) {
     res.header('Access-Control-Allow-Origin', origin);
   } else {
-    // Default to frontend in production
     res.header('Access-Control-Allow-Origin', 'https://frontend-satish-pals-projects.vercel.app');
   }
   
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Headers', '*');
   res.header('Access-Control-Allow-Credentials', 'true');
   
-  // Handle preflight OPTIONS requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -65,9 +63,7 @@ app.use(function(req, res, next) {
 // Also keep the regular cors middleware as a fallback
 app.use(cors({
   origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
-    
     if (allowedOrigins.includes(origin)) {
       callback(null, origin);
     } else {
@@ -76,21 +72,42 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'Accept']
+  allowedHeaders: '*'
 }));
 
 // Handle preflight requests for all routes
 app.options('*', (req, res) => {
+  console.log('Handling OPTIONS preflight request for:', req.path);
+  console.log('Request headers:', req.headers);
+  
   const origin = req.headers.origin;
+  const allowedOrigins = [
+    'https://test-series-frontend-one.vercel.app',
+    'https://dist-grd853wzy-satish-pals-projects.vercel.app',
+    'https://frontend-9mib7iesp-satish-pals-projects.vercel.app',
+    'https://frontend-satish-pals-projects.vercel.app',
+    'https://vidya-test-series.vercel.app',
+    'http://localhost:5173'
+  ];
+  
   if (allowedOrigins.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   } else {
-    res.setHeader('Access-Control-Allow-Origin', 'https://test-series-frontend-one.vercel.app');
+    res.setHeader('Access-Control-Allow-Origin', 'https://frontend-satish-pals-projects.vercel.app');
+  }
+  
+  // Allow all requested headers
+  const requestHeaders = req.headers['access-control-request-headers'];
+  if (requestHeaders) {
+    res.setHeader('Access-Control-Allow-Headers', requestHeaders);
+  } else {
+    res.setHeader('Access-Control-Allow-Headers', '*');
   }
   
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Max-Age', '86400'); // 24 hours
+  
   res.status(204).end();
 });
 

@@ -6,6 +6,7 @@ const { verifyToken, isAdmin } = require('../middleware/auth');
 const admin = require('firebase-admin');
 const TestAttempt = require('../models/TestAttempt');
 const TestSeries = require('../models/TestSeries');
+const statsEndpointCors = require('../middleware/statsEndpointCors');
 
 // Register new user (no token verification required)
 router.post('/register', async (req, res) => {
@@ -263,8 +264,8 @@ router.get('/:id/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// Get user statistics and recent test attempts
-router.get('/:id/stats', verifyToken, async (req, res) => {
+// Stats endpoint with dedicated CORS middleware
+router.get('/:id/stats', statsEndpointCors, verifyToken, async (req, res) => {
   try {
     // Check if the requested user is the logged-in user or the user is an admin
     if (req.params.id !== req.user.firebaseId && !req.dbUser.isAdmin()) {

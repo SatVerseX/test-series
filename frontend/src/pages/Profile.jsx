@@ -360,6 +360,7 @@ const Profile = () => {
           // Now fetch user stats separately which includes test history
           try {
             console.log('Fetching user stats...');
+            // Don't use cache busting for stats endpoint to avoid CORS issues
             const statsResponse = await api.get(`/api/users/${currentUser.uid}/stats`);
             console.log('User stats received:', statsResponse.data);
             

@@ -57,6 +57,7 @@ const TestLeaderboardPage = () => {
         if (!testId && user) {
           setLoading(true);
           // Fetch the user's stats which includes test attempts
+          // Don't use cache busting for stats endpoint to avoid CORS issues
           const response = await api.get(`/api/users/${user.firebaseId}/stats`);
           
           if (response.data && Array.isArray(response.data.recentTests)) {

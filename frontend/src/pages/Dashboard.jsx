@@ -205,8 +205,7 @@ const Dashboard = () => {
       try {
         setLoading(true);
         const response = await api.get(
-          `/api/users/${user.firebaseId}/stats`, 
-          addCacheBusting()
+          `/api/users/${user.firebaseId}/stats`
         );
         console.log('User stats received:', response.data);
         setStats(response.data);
@@ -399,12 +398,12 @@ const Dashboard = () => {
               </Typography>
               
               <Box display="flex" flexDirection="column" gap={2.5}>
-                <ActionButton 
+                {/*<ActionButton 
                   icon={<TakeTestIcon />}
                   label="Take a Test"
                   onClick={() => navigate("/tests")}
                   color="primary"
-                />
+                />*/}
                 
                 <ActionButton 
                   icon={<CategoryIcon />}

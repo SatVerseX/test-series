@@ -65,6 +65,7 @@ const MyTests = () => {
         await fetchSubscribedSeries();
         
         // Fetch user test history (completed and in-progress tests)
+        // Don't use cache busting for stats endpoint to avoid CORS issues
         const statsResponse = await api.get(`/api/users/${user.firebaseId}/stats`);
         
         // Separate into completed and in-progress tests

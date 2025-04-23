@@ -50,9 +50,15 @@ export const clearTestCache = (testId) => {
  * Add cache-busting headers to a request config object for Axios
  * 
  * @param {Object} config - Optional axios config object
+ * @param {String} url - The URL being requested (optional)
  * @returns {Object} Axios config with cache-busting headers
  */
-export const addCacheBusting = (config = {}) => {
+export const addCacheBusting = (config = {}, url = '') => {
+  // Skip cache busting for stats endpoint to avoid CORS issues
+  if (url && url.includes('/stats')) {
+    return config;
+  }
+  
   return {
     ...config,
     headers: {

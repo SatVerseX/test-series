@@ -193,6 +193,7 @@ const TestCategoryList = () => {
         
         // Fetch user's test attempts
         if (user) {
+          // Remove any cache busting for stats endpoint to avoid CORS issues
           const statsResponse = await api.get(`/api/users/${user.firebaseId}/stats`);
           const attempts = statsResponse.data.recentTests || [];
           setUserAttempts(attempts);
